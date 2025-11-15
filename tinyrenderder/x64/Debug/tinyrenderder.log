@@ -1,38 +1,24 @@
-﻿  main.cpp
-D:\cg\lab3\tinyrenderder\main.cpp(27,15): warning C4244: инициализация: преобразование "double" в "int", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(73,83): warning C4244: аргумент: преобразование "double" в "t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(73,83): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(73,83): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(73,83): warning C4244:             t=int
-D:\cg\lab3\tinyrenderder\main.cpp(73,83): warning C4244:         ]
-D:\cg\lab3\tinyrenderder\main.cpp(73,57): warning C4244: аргумент: преобразование "double" в "t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(73,57): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(73,57): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(73,57): warning C4244:             t=int
-D:\cg\lab3\tinyrenderder\main.cpp(73,57): warning C4244:         ]
-D:\cg\lab3\tinyrenderder\main.cpp(80,136): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(80,119): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(80,102): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
-D:\cg\lab3\tinyrenderder\geometry.h(18,75): warning C4244: аргумент: преобразование "float" в "t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\geometry.h(18,75): warning C4244:         with
-D:\cg\lab3\tinyrenderder\geometry.h(18,75): warning C4244:         [
-D:\cg\lab3\tinyrenderder\geometry.h(18,75): warning C4244:             t=int
-D:\cg\lab3\tinyrenderder\geometry.h(18,75): warning C4244:         ]
-  (компиляция исходного файла "main.cpp")
-      D:\cg\lab3\tinyrenderder\geometry.h(18,75):
-      контекст создания экземпляра шаблона (сначала самый старый)
-          D:\cg\lab3\tinyrenderder\main.cpp(14,6):
-          выполняется компиляция ссылки на экземпляр класс шаблон функции "Vec2<int>"
-          D:\cg\lab3\tinyrenderder\geometry.h(18,17):
-          во время компиляции функции-члена класс шаблон "Vec2<int> Vec2<int>::operator *(float) const"
-              D:\cg\lab3\tinyrenderder\main.cpp(48,22):
-              см. первую ссылку на Vec2<int>::operator * "triangle"
-  
-D:\cg\lab3\tinyrenderder\geometry.h(18,70): warning C4244: аргумент: преобразование "float" в "t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\geometry.h(18,70): warning C4244:         with
-D:\cg\lab3\tinyrenderder\geometry.h(18,70): warning C4244:         [
-D:\cg\lab3\tinyrenderder\geometry.h(18,70): warning C4244:             t=int
-D:\cg\lab3\tinyrenderder\geometry.h(18,70): warning C4244:         ]
-  (компиляция исходного файла "main.cpp")
-  
+﻿  geometry.cpp
+  main.cpp
+D:\cg\lab3\tinyrenderder\main.cpp(31,23): warning C4244: инициализация: преобразование "double" в "float", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(62,95): warning C4244: аргумент: преобразование "double" в "t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(62,95): warning C4244:         with
+D:\cg\lab3\tinyrenderder\main.cpp(62,95): warning C4244:         [
+D:\cg\lab3\tinyrenderder\main.cpp(62,95): warning C4244:             t=int
+D:\cg\lab3\tinyrenderder\main.cpp(62,95): warning C4244:         ]
+D:\cg\lab3\tinyrenderder\main.cpp(62,76): warning C4244: аргумент: преобразование "double" в "t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(62,76): warning C4244:         with
+D:\cg\lab3\tinyrenderder\main.cpp(62,76): warning C4244:         [
+D:\cg\lab3\tinyrenderder\main.cpp(62,76): warning C4244:             t=int
+D:\cg\lab3\tinyrenderder\main.cpp(62,76): warning C4244:         ]
+D:\cg\lab3\tinyrenderder\main.cpp(62,56): warning C4244: аргумент: преобразование "double" в "t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(62,56): warning C4244:         with
+D:\cg\lab3\tinyrenderder\main.cpp(62,56): warning C4244:         [
+D:\cg\lab3\tinyrenderder\main.cpp(62,56): warning C4244:             t=int
+D:\cg\lab3\tinyrenderder\main.cpp(62,56): warning C4244:         ]
+D:\cg\lab3\tinyrenderder\main.cpp(69,135): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(69,120): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(69,105): warning C4244: аргумент: преобразование "float" в "unsigned char", возможна потеря данных
+  model.cpp
+  Создание кода...
   tinyrenderder.vcxproj -> D:\cg\lab3\tinyrenderder\x64\Debug\tinyrenderder.exe

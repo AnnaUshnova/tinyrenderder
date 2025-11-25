@@ -1,34 +1,70 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
+# ────────────────
+# Компиляторы / сборка
+# ────────────────
+/build/
+/out/
+/bin/
+/obj/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+/*.make
+/*.ninja
+/*.sln
+/*.vcxproj
+/*.vcxproj.filters
+/*.vcxproj.user
 .vs/
+
+# ────────────────
+# Visual Studio / Windows
+# ────────────────
+*.pdb
+*.idb
+*.ilk
+*.obj
+*.exe
+*.log
+*.tlog/
+*.user
+*.opensdf
+*.sdf
+*.cache
+*.VC.opendb
+*.ipch
+
+# ────────────────
+# VSCode
+# ────────────────
+.vscode/
+*.code-workspace
+
+# ────────────────
+# Генерируемые изображения
+# ────────────────
+*.tga
+*.png
+*.jpg
+*.bmp
+
+# ────────────────
+# Сам tinyrenderer: оставить модели, но игнорировать мусор
+# ────────────────
+# (оставляем obj/*.obj и obj/*.tga)
+# если будут дополнительные временные файлы — игнорировать:
+/obj/*.mtl~
+/obj/*.obj~
+/obj/*backup*
+
+# ────────────────
+# ОС / редакторы
+# ────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+*.swp
+*.swo
+*.tmp
+*.bak

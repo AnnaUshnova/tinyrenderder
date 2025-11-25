@@ -196,6 +196,8 @@ void TGAImage::flip_vertically() {
                 std::swap(data[(i+j*w)*bpp+b], data[(i+(h-1-j)*w)*bpp+b]);
 }
 
+
+
 int TGAImage::width() const {
     return w;
 }

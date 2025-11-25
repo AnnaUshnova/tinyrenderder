@@ -5,33 +5,80 @@ extern mat<4,4> ModelView, Perspective; // "OpenGL" state matrices and
 extern std::vector<double> zbuffer;     // the depth buffer
 
 struct PhongShader : IShader {
-    const Model &model;
-    vec3 l;          // light direction in eye coordinates
-    vec3 tri[3];     // triangle in eye coordinates
+    const Model& model;
 
-    PhongShader(const vec3 light, const Model &m) : model(m) {
-        l = normalized((ModelView*vec4{light.x, light.y, light.z, 0.}).xyz()); // transform the light vector to view coordinates
+    vec4 light_dir_eye;     // направление света в eye-space
+    vec2 varying_uv[3];     // UV на вершинах
+    vec3 varying_pos[3];    // позиция в eye-space (для вычисления view direction)
+    vec3 varying_nrm[3];    // геометрическая нормаль (для построения TBN)
+
+    PhongShader(const vec3 light, const Model& m) : model(m) {
+        light_dir_eye = normalized(ModelView * vec4{ light.x, light.y, light.z, 0. });
     }
 
+    // --- VERTEX SHADER -------------------------------------------------------
     virtual vec4 vertex(const int face, const int vert) {
-        vec3 v = model.vert(face, vert);                          // current vertex in object coordinates
-        vec4 gl_Position = ModelView * vec4{v.x, v.y, v.z, 1.};
-        tri[vert] = gl_Position.xyz();                            // in eye coordinates
-        return Perspective * gl_Position;                         // in clip coordinates
+
+        varying_uv[vert] = model.uv(face, vert);
+
+        // исходная позиция в мире
+        vec3 v = model.vert(face, vert);
+
+        // нормаль вершины (из .obj)
+        varying_nrm[vert] = model.normal(face, vert);
+
+        // перевод позиции в eye-space
+        vec4 gl_Position = ModelView * vec4{ v.x, v.y, v.z, 1. };
+        varying_pos[vert] = gl_Position.xyz();
+
+        return Perspective * gl_Position;
     }
 
-    virtual std::pair<bool,TGAColor> fragment(const vec3 bar) const {
-        TGAColor gl_FragColor = {255, 255, 255, 255};             // output color of the fragment
-        vec3 n = normalized(cross(tri[1]-tri[0], tri[2]-tri[0])); // triangle normal in eye coordinates
-        vec3 r = normalized(n * (n * l)*2 - l);                   // reflected light direction
-        double ambient = .3;                                      // ambient light intensity
-        double diff = std::max(0., n * l);                        // diffuse light intensity
-        double spec = std::pow(std::max(r.z, 0.), 35);            // specular intensity, note that the camera lies on the z-axis (in eye coordinates), therefore simple r.z, since (0,0,1)*(r.x, r.y, r.z) = r.z
-        for (int channel : {0,1,2})
-            gl_FragColor[channel] *= std::min(1., ambient + .4*diff + .9*spec);
-        return {false, gl_FragColor};                             // do not discard the pixel
+    // --- FRAGMENT SHADER -----------------------------------------------------
+    virtual std::pair<bool, TGAColor> fragment(const vec3 bar) const {
+
+        vec2 uv = varying_uv[0] * bar[0] +
+            varying_uv[1] * bar[1] +
+            varying_uv[2] * bar[2];
+
+        // diffuse
+        TGAColor color = model.diffuse(uv);
+
+        // normal from normal map (tinyrenderer format = already in view space)
+        vec3 n = normalized(model.normal(uv));
+
+        vec3 l = normalized(light_dir_eye.xyz());
+
+        // phong components
+        double ambient = 0.3;
+        double diff = std::max(0., n * l);
+
+        // reflection vector
+        vec3 r = normalized(n * (2.0 * (n * l)) - l);
+
+        // SPECULAR FROM SPEC MAP (important!!)
+        float spec_power = model.specular(uv);
+        if (spec_power < 1) spec_power = 1;
+
+        // *** key trick: mix old r.z hack with correct r*l ***
+        double spec_old = std::pow(std::max(r.z, 0.), 35.0);      // bright punchy highlight
+        double spec_real = std::pow(std::max(0., r * l), spec_power);  // correct phong
+
+        // blend them: keeps realism + gives nice bright highlight
+        double spec = spec_real * 0.5 + spec_old * 0.7;
+
+        // final color
+        for (int ch : {0, 1, 2})
+            color[ch] = std::min(255.,
+                color[ch] * (ambient + diff * 0.4 + spec * 0.9));
+
+        return { false, color };
     }
+
+
 };
+
+
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -41,7 +88,7 @@ int main(int argc, char** argv) {
 
     constexpr int width  = 800;      // output image size
     constexpr int height = 800;
-    constexpr vec3  light{ 1, 1, 1}; // light source
+    constexpr vec3  light{ -1, 1, 3}; // light source
     constexpr vec3    eye{-1, 0, 2}; // camera position
     constexpr vec3 center{ 0, 0, 0}; // camera direction
     constexpr vec3     up{ 0, 1, 0}; // camera up vector

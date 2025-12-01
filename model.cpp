@@ -105,6 +105,42 @@ Model::Model(const std::string filename) {
 
     std::cerr << "# v# " << nverts() << " f# " << nfaces() << std::endl;
 
+    // compute per-vertex tangents (after parsing!)
+    tangents.assign(verts.size(), vec3{ 0,0,0 });
+
+    for (int f = 0; f < nfaces(); f++) {
+        int i0 = facet_vrt[3 * f + 0];
+        int i1 = facet_vrt[3 * f + 1];
+        int i2 = facet_vrt[3 * f + 2];
+
+        vec3 v0 = verts[i0];
+        vec3 v1 = verts[i1];
+        vec3 v2 = verts[i2];
+
+        vec2 uv0 = tex[facet_tex[3 * f + 0]];
+        vec2 uv1 = tex[facet_tex[3 * f + 1]];
+        vec2 uv2 = tex[facet_tex[3 * f + 2]];
+
+        vec3 e1 = v1 - v0;
+        vec3 e2 = v2 - v0;
+        vec2 duv1 = uv1 - uv0;
+        vec2 duv2 = uv2 - uv0;
+
+        double r = (duv1.x * duv2.y - duv1.y * duv2.x);
+        if (std::abs(r) < 1e-9) continue;
+        r = 1.0 / r;
+
+        vec3 t = (e1 * duv2.y - e2 * duv1.y) * r;
+
+        tangents[i0] = tangents[i0] + t;
+        tangents[i1] = tangents[i1] + t;
+        tangents[i2] = tangents[i2] + t;
+    }
+
+    for (size_t i = 0; i < tangents.size(); i++)
+        tangents[i] = normalized(tangents[i]);
+
+
     // load textures ------------------------------------------------------------
     auto load_texture = [&](const std::string& suffix, TGAImage& img) {
         size_t dot = filename.find_last_of(".");

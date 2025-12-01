@@ -1,50 +1,130 @@
-#include <algorithm>
 #include "our_gl.h"
+#include <limits>
+#include <algorithm>
+#include <iostream>
+#include <climits>
 
-mat<4, 4> ModelView, Viewport, Perspective; // "OpenGL" state matrices
-std::vector<double> zbuffer;               // depth buffer
+// globals
+mat<4, 4> ModelView = mat<4, 4>::identity();
+mat<4, 4> Perspective = mat<4, 4>::identity();
+mat<4, 4> Viewport = mat<4, 4>::identity();
+std::vector<double> zbuffer;
 
+// diagnostics
+static std::size_t g_fragments_drawn = 0;
+static int g_min_x = INT_MAX, g_min_y = INT_MAX, g_max_x = INT_MIN, g_max_y = INT_MIN;
+static double g_min_z = 1e9, g_max_z = -1e9;
+
+// helpers
+static mat<4, 4> identity4() { return mat<4, 4>::identity(); }
+
+// setup
 void lookat(const vec3 eye, const vec3 center, const vec3 up) {
-    vec3 n = normalized(eye - center);
-    vec3 l = normalized(cross(up, n));
-    vec3 m = normalized(cross(n, l));
-    ModelView = mat<4, 4>{ {{l.x,l.y,l.z,0}, {m.x,m.y,m.z,0}, {n.x,n.y,n.z,0}, {0,0,0,1}} } *
-        mat<4, 4>{{{1, 0, 0, -center.x}, { 0,1,0,-center.y }, { 0,0,1,-center.z }, { 0,0,0,1 }}};
+    vec3 z = normalized(eye - center);
+    vec3 x = normalized(cross(up, z));
+    vec3 y = cross(z, x);
+
+    ModelView = identity4();
+
+    // rotation
+    ModelView[0][0] = x[0]; ModelView[0][1] = x[1]; ModelView[0][2] = x[2];
+    ModelView[1][0] = y[0]; ModelView[1][1] = y[1]; ModelView[1][2] = y[2];
+    ModelView[2][0] = z[0]; ModelView[2][1] = z[1]; ModelView[2][2] = z[2];
+
+    // translation (camera at eye)
+    ModelView[0][3] = -dot(x, eye);
+    ModelView[1][3] = -dot(y, eye);
+    ModelView[2][3] = -dot(z, eye);
 }
 
-void init_perspective(const double f) {
-    Perspective = { {{1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0, -1 / f,1}} };
+void init_perspective(double fov_deg, double aspect, double znear, double zfar) {
+    double fov = fov_deg * M_PI / 180.0;
+    double t = std::tan(fov / 2.0);
+
+    Perspective = mat<4, 4>::identity();
+    Perspective[0][0] = 1.0 / (aspect * t);
+    Perspective[1][1] = 1.0 / t;
+    Perspective[2][2] = -(zfar + znear) / (zfar - znear);
+    Perspective[2][3] = -2.0 * zfar * znear / (zfar - znear);
+    Perspective[3][2] = -1.0;
+    Perspective[3][3] = 0.0;
 }
 
-void init_viewport(const int x, const int y, const int w, const int h) {
-    Viewport = { {{w / 2., 0, 0, x + w / 2.}, {0, h / 2., 0, y + h / 2.}, {0,0,1,0}, {0,0,0,1}} };
+
+
+void init_viewport(int x, int y, int w, int h) {
+    Viewport = identity4();
+    Viewport[0][0] = w / 2.0;
+    Viewport[1][1] = h / 2.0;
+    Viewport[0][3] = x + w / 2.0;
+    Viewport[1][3] = y + h / 2.0;
+
+    // set z mapping to [0,1]
+    Viewport[2][2] = 0.5;
+    Viewport[2][3] = 0.5;
 }
 
-void init_zbuffer(const int width, const int height) {
-    zbuffer = std::vector(width * height, -1000.);
+void init_zbuffer(int width, int height) {
+    zbuffer.assign(width * height, -std::numeric_limits<double>::infinity());
+}
+
+// barycentric as cross-product method
+static vec3 barycentric(const vec2& A, const vec2& B, const vec2& C, const vec2& P) {
+    vec3 s0 = { C[0] - A[0], B[0] - A[0], A[0] - P[0] };
+    vec3 s1 = { C[1] - A[1], B[1] - A[1], A[1] - P[1] };
+    vec3 u = cross(s0, s1);
+    if (std::abs(u[2]) < 1e-9) return vec3{ -1,1,1 };
+    return vec3{ 1.0 - (u[0] + u[1]) / u[2], u[1] / u[2], u[0] / u[2] };
 }
 
 void rasterize(const Triangle& clip, const IShader& shader, TGAImage& framebuffer) {
-    vec4 ndc[3] = { clip[0] / clip[0].w, clip[1] / clip[1].w, clip[2] / clip[2].w };                // normalized device coordinates
-    vec2 screen[3] = { (Viewport * ndc[0]).xy(), (Viewport * ndc[1]).xy(), (Viewport * ndc[2]).xy() }; // screen coordinates
+    // clip are clip-space vec4 (from shader.vertex)
+    vec4 v0 = clip[0], v1 = clip[1], v2 = clip[2];
 
-    mat<3, 3> ABC = { { {screen[0].x, screen[0].y, 1.}, {screen[1].x, screen[1].y, 1.}, {screen[2].x, screen[2].y, 1.} } };
-    if (ABC.det() < 1) return; // backface culling + discarding triangles that cover less than a pixel
+    // perspective divide -> NDC
+    vec4 ndc4[3] = { v0 / v0[3], v1 / v1[3], v2 / v2[3] };
+    vec2 screen[3] = { (Viewport * ndc4[0]).xy(), (Viewport * ndc4[1]).xy(), (Viewport * ndc4[2]).xy() };
 
-    auto [bbminx, bbmaxx] = std::minmax({ screen[0].x, screen[1].x, screen[2].x }); // bounding box for the triangle
-    auto [bbminy, bbmaxy] = std::minmax({ screen[0].y, screen[1].y, screen[2].y }); // defined by its top left and bottom right corners
-#pragma omp parallel for
-    for (int x = std::max<int>(bbminx, 0); x <= std::min<int>(bbmaxx, framebuffer.width() - 1); x++) {         // clip the bounding box by the screen
-        for (int y = std::max<int>(bbminy, 0); y <= std::min<int>(bbmaxy, framebuffer.height() - 1); y++) {
-            vec3 bc = ABC.invert_transpose() * vec3 { static_cast<double>(x), static_cast<double>(y), 1. }; // barycentric coordinates of {x,y} w.r.t the triangle
-            if (bc.x < 0 || bc.y < 0 || bc.z < 0) continue;                                                    // negative barycentric coordinate => the pixel is outside the triangle
-            double z = bc * vec3{ ndc[0].z, ndc[1].z, ndc[2].z };  // linear interpolation of the depth
-            if (z <= zbuffer[x + y * framebuffer.width()]) continue;   // discard fragments that are too deep w.r.t the z-buffer
+    // bounding box
+    int minx = std::max(0, (int)std::floor(std::min({ screen[0][0], screen[1][0], screen[2][0] })));
+    int maxx = std::min(framebuffer.width() - 1, (int)std::ceil(std::max({ screen[0][0], screen[1][0], screen[2][0] })));
+    int miny = std::max(0, (int)std::floor(std::min({ screen[0][1], screen[1][1], screen[2][1] })));
+    int maxy = std::min(framebuffer.height() - 1, (int)std::ceil(std::max({ screen[0][1], screen[1][1], screen[2][1] })));
+
+    if (minx > maxx || miny > maxy) return;
+
+    for (int x = minx; x <= maxx; ++x) {
+        for (int y = miny; y <= maxy; ++y) {
+            vec2 P{ (double)x + 0.5, (double)y + 0.5 };
+            vec3 bc = barycentric(screen[0], screen[1], screen[2], P);
+            if (bc[0] < 0 || bc[1] < 0 || bc[2] < 0) continue;
+
+            // interpolate depth (use ndc z)
+            double z = bc[0] * ndc4[0].xyz()[2] + bc[1] * ndc4[1].xyz()[2] + bc[2] * ndc4[2].xyz()[2];
+            int idx = x + y * framebuffer.width();
+            if (z <= zbuffer[idx]) continue;
+
             auto [discard, color] = shader.fragment(bc);
-            if (discard) continue;                                 // fragment shader can discard current fragment
-            zbuffer[x + y * framebuffer.width()] = z;                  // update the z-buffer
-            framebuffer.set(x, y, color);                          // update the framebuffer
+            if (discard) continue;
+
+            zbuffer[idx] = z;
+            framebuffer.set(x, y, color);
+
+            // diagnostics
+            ++g_fragments_drawn;
+            g_min_x = std::min(g_min_x, x);
+            g_min_y = std::min(g_min_y, y);
+            g_max_x = std::max(g_max_x, x);
+            g_max_y = std::max(g_max_y, y);
+            g_min_z = std::min(g_min_z, z);
+            g_max_z = std::max(g_max_z, z);
         }
     }
 }
 
+void print_render_stats() {
+    std::cerr << "DEBUG: fragments=" << g_fragments_drawn
+        << " bbox=[" << g_min_x << "," << g_min_y << "] - ["
+        << g_max_x << "," << g_max_y << "]"
+        << " z-range=[" << g_min_z << "," << g_max_z << "]\n";
+}

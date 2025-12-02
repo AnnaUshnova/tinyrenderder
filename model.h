@@ -18,6 +18,7 @@ public:
     // normals
     vec3 normal(int iface, int nthvert) const;
     vec3 normal(const vec2& uv) const;
+    bool hasNormalMap() const { return normalmap.width() > 0; }
 
     // uv coordinates
     vec2 uv(int iface, int nthvert) const;

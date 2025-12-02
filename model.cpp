@@ -174,15 +174,20 @@ vec3 Model::normal(int iface, int nthvert) const {
 }
 
 vec3 Model::normal(const vec2& uv) const {
+    if (normalmap.width() == 0) {
+        // Если карты нормалей нет, возвращаем (0,0,1)
+        return vec3{ 0, 0, 1 };
+    }
+
     TGAColor c = normalmap.get(
         uv.x * normalmap.width(),
         uv.y * normalmap.height()
     );
 
     vec3 n;
-    n.x = (double)c[2] / 255.0 * 2.0 - 1.0;
-    n.y = (double)c[1] / 255.0 * 2.0 - 1.0;
-    n.z = (double)c[0] / 255.0 * 2.0 - 1.0;
+    n.x = (double)c[2] / 255.0 * 2.0 - 1.0;  // R
+    n.y = (double)c[1] / 255.0 * 2.0 - 1.0;  // G  
+    n.z = (double)c[0] / 255.0 * 2.0 - 1.0;  // B
 
     return normalized(n);
 }

@@ -56,39 +56,48 @@ struct PhongShader : IShader {
     }
 
     virtual std::pair<bool, TGAColor> fragment(const vec3 bar) const {
-        vec2 uv =
-            varying_uv[0] * bar[0] +
-            varying_uv[1] * bar[1] +
-            varying_uv[2] * bar[2];
+        // Получаем позиции в пространстве камеры
+        vec3 p = varying_pos[0] * bar[0] + varying_pos[1] * bar[1] + varying_pos[2] * bar[2];
 
-        // diffuse color
-        TGAColor color = model.diffuse(uv);
+        // Вычисляем геометрическую нормаль из интерполированных позиций
+        // Но нужно иметь доступ к трем вершинам треугольника...
+        // Вместо этого используем интерполированные нормали
+        vec3 n = normalized(varying_nrm[0] * bar[0] +
+            varying_nrm[1] * bar[1] +
+            varying_nrm[2] * bar[2]);
 
-        // detect "black = no diffuse"
-        if (color[0] == 0 && color[1] == 0 && color[2] == 0) {
-            color = TGAColor(255, 255, 255);
-        }
-
-        // normal from normal map
-        vec3 n = normalized(model.normal(uv));
         vec3 l = normalized(light_dir_eye.xyz());
-
-        double ambient = 0.3;
         double diff = std::max(0., dot(n, l));
 
-        vec3 r = normalized(n * (2.0 * dot(n, l)) - l);
+        vec2 uv = varying_uv[0] * bar[0] + varying_uv[1] * bar[1] + varying_uv[2] * bar[2];
+        TGAColor color = model.diffuse(uv);
 
-        float spec_power = model.specular(uv);
-        if (spec_power < 1) spec_power = 1;
-
-        double spec_old = std::pow(std::max(r[2], 0.), 35.0);
-        double spec_real = std::pow(std::max(0., dot(r, l)), spec_power);
-        double spec = spec_real * 0.5 + spec_old * 0.7;
+        // Простое освещение как в старом коде
+        double ambient = 0.3;
+        double spec = 0.0; // Отключим блики для глаз
 
         for (int ch = 0; ch < 3; ch++) {
-            color[ch] = std::min(255., color[ch] * (ambient + diff * 0.4 + spec * 0.9));
+            color[ch] = std::min(255.0, color[ch] * (ambient + 0.7 * diff));
         }
 
+        return { false, color };
+    }
+};
+
+struct EyeShader : IShader {
+    const Model& model;
+    vec2 varying_uv[3];
+
+    virtual vec4 vertex(const int face, const int vert) {
+        varying_uv[vert] = model.uv(face, vert);
+        vec3 v = model.vert(face, vert);
+        return Perspective * ModelView * vec4{ v[0], v[1], v[2], 1. };
+    }
+
+    virtual std::pair<bool, TGAColor> fragment(const vec3 bar) const {
+        vec2 uv = varying_uv[0] * bar[0] + varying_uv[1] * bar[1] + varying_uv[2] * bar[2];
+        TGAColor color = model.diffuse(uv);
+        // Никакого освещения, только текстура
         return { false, color };
     }
 };
@@ -139,9 +148,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    constexpr vec3 light{ -1, 1, 3 };
-    constexpr vec3 eye{ -1, 0, 2 };
-    constexpr vec3 center{ 0, 0, 0 };
+    constexpr vec3 light{ 1, 2, 3 };
+    constexpr vec3 eye{ -1, 0.5, 3 };    // Камера справа-сверху-спереди
+    constexpr vec3 center{ 0, 0, 0 }; // Смотрим на центр
     constexpr vec3 up{ 0, 1, 0 };
 
     lookat(eye, center, up);

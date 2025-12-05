@@ -7,6 +7,7 @@
 #include "our_gl.h"
 #include "model.h"
 #include "tgaimage.h"
+#include "camera.h"
 
 // externs from your GL helpers
 extern mat<4, 4> ModelView, Perspective;
@@ -153,8 +154,12 @@ int main(int argc, char** argv) {
     constexpr vec3 center{ 0, 0, 0 }; // Смотрим на центр
     constexpr vec3 up{ 0, 1, 0 };
 
-    lookat(eye, center, up);
-    init_perspective(60.0, double(WIDTH) / HEIGHT, 0.1, 100.0);
+    Camera cam(eye, center, up);
+    cam.setPerspective(60.0, (double)WIDTH / HEIGHT, 0.1, 100.0);
+
+    ModelView = cam.view;
+    Perspective = cam.proj;
+
     init_viewport(WIDTH / 16, HEIGHT / 16, WIDTH * 7 / 8, HEIGHT * 7 / 8);
     init_zbuffer(WIDTH, HEIGHT);
 

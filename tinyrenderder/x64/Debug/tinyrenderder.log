@@ -5,25 +5,12 @@ D:\cg\lab3\tinyrenderder\model.h(11,43): warning C4267: return: преобраз
 D:\cg\lab3\tinyrenderder\model.h(12,50): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "main.cpp")
   
-D:\cg\lab3\tinyrenderder\main.cpp(81,33): warning C4244: =: преобразование "const _Ty" в "uint8_t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(81,33): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(81,33): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(81,33): warning C4244:             _Ty=double
-D:\cg\lab3\tinyrenderder\main.cpp(81,33): warning C4244:         ]
-D:\cg\lab3\tinyrenderder\main.cpp(234,30): warning C4244: =: преобразование "const _Ty" в "uint8_t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(234,30): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(234,30): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(234,30): warning C4244:             _Ty=double
-D:\cg\lab3\tinyrenderder\main.cpp(234,30): warning C4244:         ]
-D:\cg\lab3\tinyrenderder\main.cpp(235,30): warning C4244: =: преобразование "const _Ty" в "uint8_t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(235,30): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(235,30): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(235,30): warning C4244:             _Ty=double
-D:\cg\lab3\tinyrenderder\main.cpp(235,30): warning C4244:         ]
-D:\cg\lab3\tinyrenderder\main.cpp(236,30): warning C4244: =: преобразование "const _Ty" в "uint8_t", возможна потеря данных
-D:\cg\lab3\tinyrenderder\main.cpp(236,30): warning C4244:         with
-D:\cg\lab3\tinyrenderder\main.cpp(236,30): warning C4244:         [
-D:\cg\lab3\tinyrenderder\main.cpp(236,30): warning C4244:             _Ty=double
-D:\cg\lab3\tinyrenderder\main.cpp(236,30): warning C4244:         ]
-tgaimage.obj : warning LNK4099: "" PDB не найден с "tgaimage.obj" или на ""; компоновка объекта выполняется как при отсутствии отладочных данных
+D:\cg\lab3\tinyrenderder\main.cpp(104,32): warning C4244: =: преобразование "const _Ty" в "uint8_t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(104,32): warning C4244:         with
+D:\cg\lab3\tinyrenderder\main.cpp(104,32): warning C4244:         [
+D:\cg\lab3\tinyrenderder\main.cpp(104,32): warning C4244:             _Ty=double
+D:\cg\lab3\tinyrenderder\main.cpp(104,32): warning C4244:         ]
+D:\cg\lab3\tinyrenderder\main.cpp(263,30): warning C4244: =: преобразование "double" в "uint8_t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(264,30): warning C4244: =: преобразование "double" в "uint8_t", возможна потеря данных
+D:\cg\lab3\tinyrenderder\main.cpp(265,30): warning C4244: =: преобразование "double" в "uint8_t", возможна потеря данных
   tinyrenderder.vcxproj -> D:\cg\lab3\tinyrenderder\x64\Debug\tinyrenderder.exe

@@ -133,11 +133,38 @@ void rasterize(const Triangle& clip, const IShader& shader, TGAImage& framebuffe
             // ћы хотим, чтобы ЅќЋ№Ў≈≈ значение z (ближе к 1) было ƒјЋ№Ў≈
             if (z >= zbuffer[idx]) continue;  // ћ≈Ќя≈ћ знак сравнени€!
 
-            auto [discard, color] = shader.fragment(bc);
+            // -------------------------------
+            // Perspective-correct barycentric:
+            // интерполируем атрибуты с поправкой на clip.w (v.w)
+            // -------------------------------
+            double w0 = v0[3];
+            double w1 = v1[3];
+            double w2 = v2[3];
+
+            // защита от делени€ на ноль
+            double invw0 = (std::abs(w0) > 1e-12) ? (1.0 / w0) : 0.0;
+            double invw1 = (std::abs(w1) > 1e-12) ? (1.0 / w1) : 0.0;
+            double invw2 = (std::abs(w2) > 1e-12) ? (1.0 / w2) : 0.0;
+
+            double denom = bc[0] * invw0 + bc[1] * invw1 + bc[2] * invw2;
+
+            vec3 pcbar;
+            if (std::abs(denom) < 1e-15) {
+                // вырожденный случай Ч падаем обратно на обычные барицентрики
+                pcbar = bc;
+            }
+            else {
+                pcbar[0] = (bc[0] * invw0) / denom;
+                pcbar[1] = (bc[1] * invw1) / denom;
+                pcbar[2] = (bc[2] * invw2) / denom;
+            }
+
+            auto [discard, color] = shader.fragment(pcbar);
             if (discard) continue;
 
             zbuffer[idx] = z;
             framebuffer.set(x, y, color);
+
 
             // diagnostics
             if (triangle_count < 10 && x == minx && y == miny) {

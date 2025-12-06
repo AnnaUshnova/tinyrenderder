@@ -117,11 +117,19 @@ struct PhongShader : IShader {
 
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 800;
-constexpr double AO_MAX_DISTANCE = 1000.0;
+// Снизил дальность для устойчивости к плохому z-буферу
+constexpr double AO_MAX_DISTANCE = 200.0;
+
+// Sentinel: в rasterize zbuffer инициализируется значением 1.0 (в our_gl.cpp).
+// Поэтому будем считать z >= EMPTY_Z_THRESH как "пусто / нет геометрии".
+constexpr double EMPTY_Z_THRESH = 0.999999;
 
 double max_elevation_angle_from_zbuffer(const std::vector<double>& zb, int px, int py, double dirx, double diry) {
     double maxangle = 0.0;
     double z0 = zb[px + py * WIDTH];
+
+    // Если у исходной точки нет запечатлённого z - не вычисляем AO
+    if (z0 >= EMPTY_Z_THRESH) return 0.0;
 
     for (double t = 1.0; t < AO_MAX_DISTANCE; t += 1.0) {
         double cx = px + dirx * t;
@@ -132,6 +140,9 @@ double max_elevation_angle_from_zbuffer(const std::vector<double>& zb, int px, i
         if (ix < 0 || ix >= WIDTH || iy < 0 || iy >= HEIGHT) return maxangle;
 
         double zc = zb[ix + iy * WIDTH];
+
+        // Пропускаем "пустые" сэмплы
+        if (zc >= EMPTY_Z_THRESH) continue;
 
         double dist = std::hypot(cx - px, cy - py);
         if (dist < 1.0) continue;
@@ -162,7 +173,7 @@ int main(int argc, char** argv) {
     light_cfg.diffuse_k = 1.0;
     light_cfg.specular_k = 0.2;
     light_cfg.shininess = 64.0;
-    light_cfg.roughness = 0.8;    // ← мотируем поверхность
+    light_cfg.roughness = 0.8;    // ← мотивируем поверхность
 
     // ------------------------------------------------------------------------
     // 2) CAMERA SETUP
@@ -211,35 +222,70 @@ int main(int argc, char** argv) {
     print_render_stats();
 
     // ------------------------------------------------------------------------
-    // 5) SSAO PASS (unchanged)
+    // Dump zbuffer visualization (new)
     // ------------------------------------------------------------------------
-    std::cout << "Phong pass done. Computing AO...\n";
+    {
+        std::cout << "Writing zbuffer visualization (zbuffer.tga)...\n";
+        TGAImage zvis(WIDTH, HEIGHT, TGAImage::GRAYSCALE);
+        for (int x = 0; x < WIDTH; x++) {
+            for (int y = 0; y < HEIGHT; y++) {
+                double z = zbuffer[x + y * WIDTH];
+                unsigned char v;
+                if (z >= EMPTY_Z_THRESH) {
+                    // пустота -> белый (даль)
+                    v = 255;
+                }
+                else {
+                    // map ndc z in [-1,1] to 0..255 (near -> 0, far -> 255)
+                    double t = (z + 1.0) * 0.5;
+                    t = std::clamp(t, 0.0, 1.0);
+                    // invert if you prefer near=white: currently near=0(black)
+                    v = (unsigned char)(t * 255.0);
+                }
+                zvis.set(x, y, TGAColor(v));
+            }
+        }
+        zvis.write_tga_file("zbuffer.tga");
+    }
+
+    // ------------------------------------------------------------------------
+    // 5) SSAO PASS (robustified)
+    // ------------------------------------------------------------------------
+    std::cout << "Phong pass done. Computing AO (robust mode)...\n";
 
     TGAImage ao(WIDTH, HEIGHT, TGAImage::GRAYSCALE);
 
     const int samples = 8;
-    const double step = M_PI / 4.0;
+    const double step = 2.0 * M_PI / samples;
 
     for (int x = 0; x < WIDTH; x++) {
         for (int y = 0; y < HEIGHT; y++) {
             double z = zbuffer[x + y * WIDTH];
 
-            if (z < -1e5) {
+            // Если точка пустая/нет примечания - оставляем максимальную освещённость (нет шадоу)
+            if (z >= EMPTY_Z_THRESH) {
                 ao.set(x, y, TGAColor(255));
                 continue;
             }
 
             double total = 0.0;
-            for (double a = 0; a < 2 * M_PI - 1e-6; a += step) {
-                total += (M_PI / 2.0 -
-                    max_elevation_angle_from_zbuffer(
-                        zbuffer, x, y, std::cos(a), std::sin(a)
-                    )
-                    );
+            for (double a = 0.0; a < 2.0 * M_PI - 1e-9; a += step) {
+                double maxang = max_elevation_angle_from_zbuffer(
+                    zbuffer, x, y, std::cos(a), std::sin(a)
+                );
+                // если maxang == 0 => нет блокеров в этом направлении
+                total += (M_PI / 2.0 - maxang);
             }
 
-            total /= (M_PI / 2.0) * samples;
-            total = std::pow(std::clamp(total, 0.0, 1.0), 100.0);
+            // нормировка по числу сэмплов и максимальному углу
+            total /= ((M_PI / 2.0) * samples);
+
+            // clamp and soften contrast (меньше "черно-белого" эффекта при шуме)
+            total = std::clamp(total, 0.0, 1.0);
+
+            // уменьшил степень, чтобы шумный z не сделал всё черным
+            double contrast_pow = 2.0;
+            total = std::pow(total, contrast_pow);
 
             ao.set(x, y, TGAColor((unsigned char)(total * 255.0)));
         }
@@ -260,9 +306,9 @@ int main(int argc, char** argv) {
             double ao_factor = aoc[0] / 255.0;
 
             TGAColor out;
-            out[2] = base[2] * ao_factor;
-            out[1] = base[1] * ao_factor;
-            out[0] = base[0] * ao_factor;
+            out[2] = (unsigned char)(base[2] * ao_factor);
+            out[1] = (unsigned char)(base[1] * ao_factor);
+            out[0] = (unsigned char)(base[0] * ao_factor);
             out[3] = 255;
 
             final_img.set(x, y, out);

@@ -1,324 +1,290 @@
-﻿// main.cpp — Phong render + SSAO (AO) post-process
+﻿// main.cpp
+// Phong rendering + normal map (with eye-protection) + SSAO-like AO
+// Outputs: phong.tga, zbuffer.tga, ao.tga, final.tga
+
 #include <vector>
 #include <cmath>
 #include <limits>
 #include <iostream>
+#include <algorithm>
 
 #include "our_gl.h"
 #include "model.h"
 #include "tgaimage.h"
-#include "camera.h"
 
-// externs from GL helpers
-extern mat<4, 4> ModelView, Perspective;
+// externals from our_gl
+extern mat<4, 4> ModelView;
+extern mat<4, 4> Perspective;
+extern mat<4, 4> Viewport;
 extern std::vector<double> zbuffer;
 
-// ============================================================================
-// LIGHTING PARAMETERS
-// ============================================================================
-struct PhongLight {
-    vec3 light_dir_world;
+// ------------------------------------------------------------------
+// Settings
+// ------------------------------------------------------------------
+const int WIDTH = 800;
+const int HEIGHT = 800;
+const char* OBJ_PATH = "obj/african_head.obj";
 
-    double ambient;
-    double diffuse_k;
-    double specular_k;
-    double shininess;
+// AO params
+constexpr int AO_NUM_DIRECTIONS = 8;
+constexpr int AO_STEPS_PER_DIR = 8;
+constexpr double AO_STEP_RADIUS = 30.0; // pixels
+constexpr double AO_OCCLUSION_THRESHOLD = 1e-3;
 
-    double roughness;   // 0 = гладко, 1 = матово
-};
+// Light (world space)
+const vec3 LIGHT_WORLD = normalized(vec3{ 1.0, 1.0, 1.0 });
 
-// ============================================================================
-// Phong Shader
-// ============================================================================
-struct PhongShader : IShader {
-    const Model& model;
-    const PhongLight& light;
+// Eye detection thresholds (to avoid normalmap on eyes)
+constexpr double EYE_DIFFUSE_BRIGHTNESS = 0.85; // normalized [0..1]
+constexpr double EYE_SPECULAR_THRESHOLD = 5.0;  // if specular < this -> likely eye (no shiny highlight needed)
 
-    vec4 light_dir_eye;
+// ------------------------------------------------------------------
+// Helper: pack/unpack
+// ------------------------------------------------------------------
+// none needed — we'll use model API
+
+// ------------------------------------------------------------------
+// Phong shader with normalmap blending + eye protection
+// ------------------------------------------------------------------
+struct PhongShader : public IShader {
+    const Model* model;
+    vec4 light_dir_eye;              // light direction in eye-space
     vec2 varying_uv[3];
-    vec3 varying_pos[3];
-    vec3 varying_nrm[3];
+    vec3 varying_pos_eye[3];         // position in eye-space before perspective
+    vec3 varying_nrm_eye[3];         // geometric normal transformed to eye-space
 
-    PhongShader(const PhongLight& lp, const Model& m)
-        : model(m), light(lp)
-    {
-        // convert light direction into eye-space using *current* ModelView
-        vec4 L = ModelView * vec4{ lp.light_dir_world[0], lp.light_dir_world[1], lp.light_dir_world[2], 0.0 };
-        vec3 l3 = normalized(L.xyz());
-        light_dir_eye = vec4{ l3[0], l3[1], l3[2], 0.0 };
+    // normalmap strength (0..1)
+    double normalmap_strength = 1.0; // use full normalmap by default, blend below for eyes
+
+    PhongShader(const Model* m, const vec3& light_world) : model(m) {
+        // transform light dir into eye-space (ModelView must be set)
+        vec4 Lw = vec4{ light_world[0], light_world[1], light_world[2], 0.0 };
+        vec4 Le = ModelView * Lw;
+        vec3 le3 = normalized(Le.xyz());
+        light_dir_eye = vec4{ le3[0], le3[1], le3[2], 0.0 };
     }
 
-    virtual vec4 vertex(const int face, const int vert) {
-        varying_uv[vert] = model.uv(face, vert);
-        vec3 v = model.vert(face, vert);
-        varying_nrm[vert] = model.normal(face, vert);
+    virtual vec4 vertex(int iface, int nth) {
+        vec3 v = model->vert(iface, nth);
+        vec3 n = model->normal(iface, nth);   // geometric normal (from OBJ)
 
-        vec4 gl_Position = ModelView * vec4{ v[0], v[1], v[2], 1.0 };
-        varying_pos[vert] = gl_Position.xyz();
+        vec2 uv = model->uv(iface, nth);
+        varying_uv[nth] = uv;
 
-        return Perspective * gl_Position;
+        // position in eye-space
+        vec4 pos_eye4 = ModelView * vec4{ v[0], v[1], v[2], 1.0 };
+        varying_pos_eye[nth] = pos_eye4.xyz();
+
+        // transform geometric normal to eye-space (w=0)
+        vec4 n_eye4 = ModelView * vec4{ n[0], n[1], n[2], 0.0 };
+        varying_nrm_eye[nth] = n_eye4.xyz();
+
+        // return clip-space position
+        vec4 clip = Perspective * pos_eye4;
+        return clip;
     }
 
-    virtual std::pair<bool, TGAColor> fragment(const vec3 bar) const {
-        vec3 p =
-            varying_pos[0] * bar[0] +
-            varying_pos[1] * bar[1] +
-            varying_pos[2] * bar[2];
+    // pcbar = perspective-correct barycentric
+    virtual std::pair<bool, TGAColor> fragment(const vec3 pcbar) const {
+        // interpolate attributes
+        vec3 p_eye = varying_pos_eye[0] * pcbar[0] + varying_pos_eye[1] * pcbar[1] + varying_pos_eye[2] * pcbar[2];
+        vec3 n_eye_geom = varying_nrm_eye[0] * pcbar[0] + varying_nrm_eye[1] * pcbar[1] + varying_nrm_eye[2] * pcbar[2];
+        vec2 uv = varying_uv[0] * pcbar[0] + varying_uv[1] * pcbar[1] + varying_uv[2] * pcbar[2];
 
-        vec3 n = normalized(
-            varying_nrm[0] * bar[0] +
-            varying_nrm[1] * bar[1] +
-            varying_nrm[2] * bar[2]
-        );
+        // base diffuse color & specular power from model
+        TGAColor base = model->diffuse(uv);
+        double spec_power = std::max(1.0, (double)model->specular(uv));
 
-        vec2 uv =
-            varying_uv[0] * bar[0] +
-            varying_uv[1] * bar[1] +
-            varying_uv[2] * bar[2];
+        // decide if this pixel is an eye region:
+        double brightness = ((double)base[0] + (double)base[1] + (double)base[2]) / (3.0 * 255.0);
+        bool likely_eye = (brightness >= EYE_DIFFUSE_BRIGHTNESS) && (spec_power <= EYE_SPECULAR_THRESHOLD);
 
-        TGAColor color = model.diffuse(uv);
+        // sample normal map (if present)
+        vec3 nm = model->normal(uv); // note: model.normal(uv) returns (x,y,z) mapped from map
+        // Transform sampled normal to eye-space too (treating as vector in object space)
+        vec4 nm_eye4 = ModelView * vec4{ nm[0], nm[1], nm[2], 0.0 };
+        vec3 nm_eye = nm_eye4.xyz();
 
-        // Light vectors
-        vec3 l = normalized(light_dir_eye.xyz());
-        vec3 v = normalized(p * -1.0);
-        vec3 r = normalized(2 * dot(n, l) * n - l);
-
-        double diff = std::max(0.0, dot(n, l));
-
-        // Roughness-modified shininess
-        double smooth_shininess = light.shininess * (1.0 - light.roughness);
-        smooth_shininess = std::max(smooth_shininess, 1.0);
-
-        double spec = 0.0;
-        double rv = std::max(dot(r, v), 0.0);
-        if (rv > 0.0)
-            spec = std::pow(rv, smooth_shininess);
-
-        // Final shading
-        for (int c = 0; c < 3; c++) {
-            double base = color[c];
-            double shaded =
-                base * (light.ambient + diff * light.diffuse_k) +
-                255.0 * spec * light.specular_k;
-
-            color[c] = std::min(255.0, shaded);
+        // Blend geometric normal and normalmap — but protect eyes
+        vec3 n_eye;
+        if (likely_eye) {
+            // use geometric normal only on eyes
+            n_eye = n_eye_geom;
+        }
+        else {
+            // blend: more weight to normalmap but keep some geometric base to avoid bad tangents
+            double nm_strength = normalmap_strength;
+            // If normalmap is absent, model.normal returns (0,0,1) — blending will be harmless
+            n_eye = normalized(n_eye_geom * (1.0 - nm_strength) + nm_eye * nm_strength);
         }
 
-        return { false, color };
+        // normalize final normal
+        n_eye = normalized(n_eye);
+
+        // lighting (eye-space)
+        vec3 l = normalized(light_dir_eye.xyz());
+        vec3 v = normalized(vec3{ -p_eye.x, -p_eye.y, -p_eye.z }); // view vector (camera at origin)
+        vec3 r = normalized((2.0 * dot(n_eye, l)) * n_eye - l);
+
+        double diff = std::max(0.0, dot(n_eye, l));
+        double spec = 0.0;
+        double rv = std::max(0.0, dot(r, v));
+        if (rv > 0.0) spec = std::pow(rv, spec_power);
+
+        // Compose final color
+        const double ambient = 0.1;
+        const double spec_strength = 0.6;
+
+        TGAColor out = base;
+        for (int c = 0; c < 3; ++c) {
+            double col = base[c];
+            double shaded = col * (ambient + diff * (1.0 - ambient)) + 255.0 * spec_strength * spec;
+            if (shaded > 255.0) shaded = 255.0;
+            out[c] = (unsigned char)(shaded);
+        }
+
+        return { false, out };
     }
 };
 
-// ============================================================================
-// AO utilities
-// ============================================================================
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+// ------------------------------------------------------------------
+// Save zbuffer to grayscale image (no flip)
+// ------------------------------------------------------------------
+static void save_zbuffer_image(const std::vector<double>& zb, int w, int h, const char* filename) {
+    TGAImage img(w, h, TGAImage::RGB);
 
-constexpr int WIDTH = 800;
-constexpr int HEIGHT = 800;
-// Снизил дальность для устойчивости к плохому z-буферу
-constexpr double AO_MAX_DISTANCE = 200.0;
-
-// Sentinel: в rasterize zbuffer инициализируется значением 1.0 (в our_gl.cpp).
-// Поэтому будем считать z >= EMPTY_Z_THRESH как "пусто / нет геометрии".
-constexpr double EMPTY_Z_THRESH = 0.999999;
-
-double max_elevation_angle_from_zbuffer(const std::vector<double>& zb, int px, int py, double dirx, double diry) {
-    double maxangle = 0.0;
-    double z0 = zb[px + py * WIDTH];
-
-    // Если у исходной точки нет запечатлённого z - не вычисляем AO
-    if (z0 >= EMPTY_Z_THRESH) return 0.0;
-
-    for (double t = 1.0; t < AO_MAX_DISTANCE; t += 1.0) {
-        double cx = px + dirx * t;
-        double cy = py + diry * t;
-
-        int ix = int(cx);
-        int iy = int(cy);
-        if (ix < 0 || ix >= WIDTH || iy < 0 || iy >= HEIGHT) return maxangle;
-
-        double zc = zb[ix + iy * WIDTH];
-
-        // Пропускаем "пустые" сэмплы
-        if (zc >= EMPTY_Z_THRESH) continue;
-
-        double dist = std::hypot(cx - px, cy - py);
-        if (dist < 1.0) continue;
-
-        double elev = zc - z0;
-        double ang = std::atan2(elev, dist);
-
-        if (ang > maxangle) maxangle = ang;
+    // find finite min/max
+    double zmin = std::numeric_limits<double>::infinity();
+    double zmax = -std::numeric_limits<double>::infinity();
+    for (int i = 0; i < w * h; ++i) {
+        double z = zb[i];
+        if (!std::isfinite(z)) continue;
+        zmin = std::min(zmin, z);
+        zmax = std::max(zmax, z);
     }
-    return maxangle;
+    if (zmin == std::numeric_limits<double>::infinity()) {
+        // empty -> white
+        for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) img.set(x, y, TGAColor(255, 255, 255));
+        img.write_tga_file(filename);
+        return;
+    }
+    if (zmax - zmin < 1e-7) zmax = zmin + 1e-7;
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            double z = zb[x + y * w];
+            if (!std::isfinite(z)) {
+                img.set(x, y, TGAColor(255, 255, 255));
+            }
+            else {
+                double t = (z - zmin) / (zmax - zmin);
+                unsigned char v = (unsigned char)(std::round(255.0 * (1.0 - t)));
+                img.set(x, y, TGAColor(v, v, v));
+            }
+        }
+    }
+    img.write_tga_file(filename);
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " obj/model.obj\n";
-        return 1;
+// ------------------------------------------------------------------
+// Simple SSAO-ish screen-space occlusion (no flip)
+// ------------------------------------------------------------------
+static double compute_ssao_at(const std::vector<double>& zb, int w, int h, int px, int py) {
+    int idx0 = px + py * w;
+    double z0 = zb[idx0];
+    if (!std::isfinite(z0)) return 1.0;
+
+    int occluded = 0;
+    int total = 0;
+
+    for (int d = 0; d < AO_NUM_DIRECTIONS; ++d) {
+        double ang = (2.0 * M_PI * d) / AO_NUM_DIRECTIONS;
+        double dx = std::cos(ang);
+        double dy = std::sin(ang);
+        for (int s = 1; s <= AO_STEPS_PER_DIR; ++s) {
+            double t = (double)s / (double)AO_STEPS_PER_DIR;
+            double radius = t * AO_STEP_RADIUS;
+            int sx = (int)std::round(px + dx * radius);
+            int sy = (int)std::round(py + dy * radius);
+            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+            int sidx = sx + sy * w;
+            double zs = zb[sidx];
+            if (!std::isfinite(zs)) {
+                total++;
+                continue;
+            }
+            if (zs < z0 - AO_OCCLUSION_THRESHOLD) occluded++;
+            total++;
+        }
     }
 
-    // ------------------------------------------------------------------------
-    // 1) LIGHT PARAMETERS (YOUR EDITABLE BLOCK!)
-    // ------------------------------------------------------------------------
-    PhongLight light_cfg;
-    light_cfg.light_dir_world = { 1, 2, 3 };
-    light_cfg.ambient = 0.25;
-    light_cfg.diffuse_k = 1.0;
-    light_cfg.specular_k = 0.2;
-    light_cfg.shininess = 64.0;
-    light_cfg.roughness = 0.8;    // ← мотивируем поверхность
+    if (total == 0) return 1.0;
+    double occ = (double)occluded / (double)total;
+    return 1.0 - occ;
+}
 
-    // ------------------------------------------------------------------------
-    // 2) CAMERA SETUP
-    // ------------------------------------------------------------------------
-    constexpr vec3 eye{ -1, 0.5, 3 };
-    constexpr vec3 center{ 0, 0, 0 };
-    constexpr vec3 up{ 0, 1, 0 };
-
-    Camera cam(eye, center, up);
-    cam.setPerspective(60.0, (double)WIDTH / HEIGHT, 0.1, 100.0);
-
-    ModelView = cam.view;
-    Perspective = cam.proj;
-
-    // ------------------------------------------------------------------------
-    // 3) RENDER SETUP
-    // ------------------------------------------------------------------------
-    init_viewport(WIDTH / 16, HEIGHT / 16, WIDTH * 7 / 8, HEIGHT * 7 / 8);
-    init_zbuffer(WIDTH, HEIGHT);
+// ------------------------------------------------------------------
+// Main
+// ------------------------------------------------------------------
+int main(int argc, char** argv) {
+    const char* model_path = (argc > 1) ? argv[1] : OBJ_PATH;
+    Model model(model_path);
 
     TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
 
-    std::cout << "Start rendering (Phong pass)...\n";
+    // init transforms + zbuffer (our_gl uses +inf sentinel)
+    init_zbuffer(WIDTH, HEIGHT);
+    vec3 eye = vec3{ 1.0, 1.0, 3.0 };
+    vec3 center = vec3{ 0.0, 0.0, 0.0 };
+    vec3 up = vec3{ 0.0, 1.0, 0.0 };
+    lookat(eye, center, up);
+    init_perspective(60.0, (double)WIDTH / (double)HEIGHT, 0.1, 100.0);
+    init_viewport(0, 0, WIDTH, HEIGHT);
 
-    // ------------------------------------------------------------------------
-    // 4) PHONG PASS
-    // ------------------------------------------------------------------------
-    for (int m = 1; m < argc; m++) {
-        Model model(argv[m]);
-        std::cerr << "Loaded model: verts=" << model.nverts()
-            << " faces=" << model.nfaces() << "\n";
+    PhongShader shader(&model, LIGHT_WORLD);
 
-        // NOTE: shader created *after* ModelView was set → OK now
-        PhongShader shader(light_cfg, model);
-
-        for (int f = 0; f < model.nfaces(); f++) {
-            Triangle tri = {
-                shader.vertex(f, 0),
-                shader.vertex(f, 1),
-                shader.vertex(f, 2)
-            };
-            rasterize(tri, shader, framebuffer);
-        }
+    // render
+    for (int f = 0; f < model.nfaces(); ++f) {
+        vec4 clip[3];
+        for (int v = 0; v < 3; ++v) clip[v] = shader.vertex(f, v);
+        rasterize(clip, shader, framebuffer);
     }
 
-    print_render_stats();
+    // PHONG image (no flip)
+    TGAImage phong_img = framebuffer;
+    phong_img.write_tga_file("phong.tga");
 
-    // ------------------------------------------------------------------------
-    // Dump zbuffer visualization (new)
-    // ------------------------------------------------------------------------
-    {
-        std::cout << "Writing zbuffer visualization (zbuffer.tga)...\n";
-        TGAImage zvis(WIDTH, HEIGHT, TGAImage::GRAYSCALE);
-        for (int x = 0; x < WIDTH; x++) {
-            for (int y = 0; y < HEIGHT; y++) {
-                double z = zbuffer[x + y * WIDTH];
-                unsigned char v;
-                if (z >= EMPTY_Z_THRESH) {
-                    // пустота -> белый (даль)
-                    v = 255;
-                }
-                else {
-                    // map ndc z in [-1,1] to 0..255 (near -> 0, far -> 255)
-                    double t = (z + 1.0) * 0.5;
-                    t = std::clamp(t, 0.0, 1.0);
-                    // invert if you prefer near=white: currently near=0(black)
-                    v = (unsigned char)(t * 255.0);
-                }
-                zvis.set(x, y, TGAColor(v));
-            }
-        }
-        zvis.write_tga_file("zbuffer.tga");
-    }
+    // ZBUFFER (no flip)
+    save_zbuffer_image(zbuffer, WIDTH, HEIGHT, "zbuffer.tga");
 
-    // ------------------------------------------------------------------------
-    // 5) SSAO PASS (robustified)
-    // ------------------------------------------------------------------------
-    std::cout << "Phong pass done. Computing AO (robust mode)...\n";
-
-    TGAImage ao(WIDTH, HEIGHT, TGAImage::GRAYSCALE);
-
-    const int samples = 8;
-    const double step = 2.0 * M_PI / samples;
-
-    for (int x = 0; x < WIDTH; x++) {
-        for (int y = 0; y < HEIGHT; y++) {
-            double z = zbuffer[x + y * WIDTH];
-
-            // Если точка пустая/нет примечания - оставляем максимальную освещённость (нет шадоу)
-            if (z >= EMPTY_Z_THRESH) {
-                ao.set(x, y, TGAColor(255));
-                continue;
-            }
-
-            double total = 0.0;
-            for (double a = 0.0; a < 2.0 * M_PI - 1e-9; a += step) {
-                double maxang = max_elevation_angle_from_zbuffer(
-                    zbuffer, x, y, std::cos(a), std::sin(a)
-                );
-                // если maxang == 0 => нет блокеров в этом направлении
-                total += (M_PI / 2.0 - maxang);
-            }
-
-            // нормировка по числу сэмплов и максимальному углу
-            total /= ((M_PI / 2.0) * samples);
-
-            // clamp and soften contrast (меньше "черно-белого" эффекта при шуме)
-            total = std::clamp(total, 0.0, 1.0);
-
-            // уменьшил степень, чтобы шумный z не сделал всё черным
-            double contrast_pow = 2.0;
-            total = std::pow(total, contrast_pow);
-
-            ao.set(x, y, TGAColor((unsigned char)(total * 255.0)));
+    // AO map (no flip)
+    TGAImage ao_img(WIDTH, HEIGHT, TGAImage::RGB);
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            double ao = compute_ssao_at(zbuffer, WIDTH, HEIGHT, x, y);
+            unsigned char v = (unsigned char)std::round(255.0 * ao);
+            ao_img.set(x, y, TGAColor(v, v, v));
         }
     }
+    ao_img.write_tga_file("ao.tga");
 
-    // ------------------------------------------------------------------------
-    // 6) COMPOSITE AO + PHONG
-    // ------------------------------------------------------------------------
-    std::cout << "AO computed. Compositing final image...\n";
-
+    // Final compose: phong * ao (final IS flipped to match previous output style)
     TGAImage final_img(WIDTH, HEIGHT, TGAImage::RGB);
-
-    for (int x = 0; x < WIDTH; x++) {
-        for (int y = 0; y < HEIGHT; y++) {
-            TGAColor base = framebuffer.get(x, y);
-            TGAColor aoc = ao.get(x, y);
-
-            double ao_factor = aoc[0] / 255.0;
-
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            TGAColor p = phong_img.get(x, y);
+            TGAColor a = ao_img.get(x, y);
+            double af = a[0] / 255.0;
             TGAColor out;
-            out[2] = (unsigned char)(base[2] * ao_factor);
-            out[1] = (unsigned char)(base[1] * ao_factor);
-            out[0] = (unsigned char)(base[0] * ao_factor);
-            out[3] = 255;
-
+            out[0] = (unsigned char)std::min(255.0, std::round(p[0] * af));
+            out[1] = (unsigned char)std::min(255.0, std::round(p[1] * af));
+            out[2] = (unsigned char)std::min(255.0, std::round(p[2] * af));
             final_img.set(x, y, out);
         }
     }
-
-    framebuffer.write_tga_file("phong_framebuffer.tga");
-    ao.write_tga_file("ao_map.tga");
     final_img.write_tga_file("final.tga");
 
-    std::cout << "Done.\n";
+    print_render_stats();
+    std::cerr << "Saved: phong.tga, zbuffer.tga, ao.tga, final.tga\n";
     return 0;
 }

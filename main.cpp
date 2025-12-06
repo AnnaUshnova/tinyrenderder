@@ -23,12 +23,13 @@ extern std::vector<double> zbuffer;
 // ------------------------------------------------------------------
 const int WIDTH = 800;
 const int HEIGHT = 800;
-const char* OBJ_PATH = "obj/african_head.obj";
+const char* OBJ_PATH = "obj/african_head/african_head.obj";
+const char* EYES_OBJ_PATH = "obj/african_head/african_head_eye_inner.obj";
 
 // AO params
 constexpr int AO_NUM_DIRECTIONS = 8;
 constexpr int AO_STEPS_PER_DIR = 8;
-constexpr double AO_STEP_RADIUS = 30.0; // pixels
+constexpr double AO_STEP_RADIUS = 16.0; // pixels
 constexpr double AO_OCCLUSION_THRESHOLD = 1e-3;
 
 // Light (world space)
@@ -39,12 +40,8 @@ constexpr double EYE_DIFFUSE_BRIGHTNESS = 0.85; // normalized [0..1]
 constexpr double EYE_SPECULAR_THRESHOLD = 5.0;  // if specular < this -> likely eye (no shiny highlight needed)
 
 // ------------------------------------------------------------------
-// Helper: pack/unpack
-// ------------------------------------------------------------------
-// none needed — we'll use model API
-
-// ------------------------------------------------------------------
 // Phong shader with normalmap blending + eye protection
+// (unchanged)
 // ------------------------------------------------------------------
 struct PhongShader : public IShader {
     const Model* model;
@@ -127,13 +124,85 @@ struct PhongShader : public IShader {
         vec3 r = normalized((2.0 * dot(n_eye, l)) * n_eye - l);
 
         double diff = std::max(0.0, dot(n_eye, l));
-        double spec = 0.0;
+        double spec = 0.1;
         double rv = std::max(0.0, dot(r, v));
         if (rv > 0.0) spec = std::pow(rv, spec_power);
 
         // Compose final color
         const double ambient = 0.1;
-        const double spec_strength = 0.6;
+        const double spec_strength = 0.3;
+
+        TGAColor out = base;
+        for (int c = 0; c < 3; ++c) {
+            double col = base[c];
+            double shaded = col * (ambient + diff * (1.0 - ambient)) + 255.0 * spec_strength * spec;
+            if (shaded > 255.0) shaded = 255.0;
+            out[c] = (unsigned char)(shaded);
+        }
+
+        return { false, out };
+    }
+};
+
+// ------------------------------------------------------------------
+// Simple Eye shader (separate, glossy but simple)
+// - uses same light direction so skin lighting remains consistent
+// - simpler fragment (no normalmap blending), stronger specular
+// ------------------------------------------------------------------
+struct EyeShader : public IShader {
+    const Model* model;
+    vec4 light_dir_eye;
+    vec2 varying_uv[3];
+    vec3 varying_pos_eye[3];
+    vec3 varying_nrm_eye[3];
+
+    EyeShader(const Model* m, const vec3& light_world) : model(m) {
+        vec4 Lw = vec4{ light_world[0], light_world[1], light_world[2], 0.0 };
+        vec4 Le = ModelView * Lw;
+        vec3 le3 = normalized(Le.xyz());
+        light_dir_eye = vec4{ le3[0], le3[1], le3[2], 0.0 };
+    }
+
+    virtual vec4 vertex(int iface, int nth) {
+        vec3 v = model->vert(iface, nth);
+        vec3 n = model->normal(iface, nth);
+
+        varying_uv[nth] = model->uv(iface, nth);
+
+        vec4 pos_eye4 = ModelView * vec4{ v[0], v[1], v[2], 1.0 };
+        varying_pos_eye[nth] = pos_eye4.xyz();
+
+        vec4 n_eye4 = ModelView * vec4{ n[0], n[1], n[2], 0.0 };
+        varying_nrm_eye[nth] = n_eye4.xyz();
+
+        return Perspective * pos_eye4;
+    }
+
+    virtual std::pair<bool, TGAColor> fragment(const vec3 pcbar) const {
+        vec3 p_eye = varying_pos_eye[0] * pcbar[0] + varying_pos_eye[1] * pcbar[1] + varying_pos_eye[2] * pcbar[2];
+        vec3 n_eye = varying_nrm_eye[0] * pcbar[0] + varying_nrm_eye[1] * pcbar[1] + varying_nrm_eye[2] * pcbar[2];
+        vec2 uv = varying_uv[0] * pcbar[0] + varying_uv[1] * pcbar[1] + varying_uv[2] * pcbar[2];
+
+        // base color from eye texture (if exists)
+        TGAColor base = model->diffuse(uv);
+
+        // make eyes glossier: amplify specular power
+        double spec_map = std::max(1.0, (double)model->specular(uv));
+        double spec_power = spec_map * 8.0; // stronger highlight for eyes
+
+        vec3 l = normalized(light_dir_eye.xyz());
+        vec3 v = normalized(vec3{ -p_eye.x, -p_eye.y, -p_eye.z });
+        vec3 rn = normalized(n_eye);
+
+        double diff = std::max(0.0, dot(rn, l));
+
+        vec3 r = normalized((2.0 * dot(rn, l)) * rn - l);
+        double rv = std::max(0.0, dot(r, v));
+        double spec = 0.0;
+        if (rv > 0.0) spec = std::pow(rv, spec_power);
+
+        const double ambient = 0.1;
+        const double spec_strength = 1.5;
 
         TGAColor out = base;
         for (int c = 0; c < 3; ++c) {
@@ -228,13 +297,17 @@ static double compute_ssao_at(const std::vector<double>& zb, int w, int h, int p
 // ------------------------------------------------------------------
 int main(int argc, char** argv) {
     const char* model_path = (argc > 1) ? argv[1] : OBJ_PATH;
+    const char* eyes_path = EYES_OBJ_PATH;
     Model model(model_path);
+
+    // load eyes model located in the same folder as the head (as requested)
+    Model eye_model(eyes_path);
 
     TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
 
     // init transforms + zbuffer (our_gl uses +inf sentinel)
     init_zbuffer(WIDTH, HEIGHT);
-    vec3 eye = vec3{ 1.0, 1.0, 3.0 };
+    vec3 eye = vec3{ 0.7, 1.0, 3.0 };
     vec3 center = vec3{ 0.0, 0.0, 0.0 };
     vec3 up = vec3{ 0.0, 1.0, 0.0 };
     lookat(eye, center, up);
@@ -243,18 +316,33 @@ int main(int argc, char** argv) {
 
     PhongShader shader(&model, LIGHT_WORLD);
 
-    // render
+    // render main model (updates zbuffer)
     for (int f = 0; f < model.nfaces(); ++f) {
         vec4 clip[3];
         for (int v = 0; v < 3; ++v) clip[v] = shader.vertex(f, v);
         rasterize(clip, shader, framebuffer);
     }
 
-    // PHONG image (no flip)
+    // Backup zbuffer before drawing eyes so AO/zbuffer remain unchanged by eyes.
+    std::vector<double> zbuffer_backup = zbuffer;
+
+    // Render eyes into the same framebuffer using a separate, simple shader.
+    EyeShader eye_shader(&eye_model, LIGHT_WORLD);
+    for (int f = 0; f < eye_model.nfaces(); ++f) {
+        vec4 clip[3];
+        for (int v = 0; v < 3; ++v) clip[v] = eye_shader.vertex(f, v);
+        rasterize(clip, eye_shader, framebuffer);
+    }
+    std::cerr << "Info: eyes rendered into framebuffer (phong) using EyeShader.\n";
+
+    // Save PHONG image (with eyes)
     TGAImage phong_img = framebuffer;
     phong_img.write_tga_file("phong.tga");
 
-    // ZBUFFER (no flip)
+    // restore zbuffer so AO and zbuffer image do not include the eyes
+    zbuffer = zbuffer_backup;
+
+    // ZBUFFER (no flip) — now without eyes
     save_zbuffer_image(zbuffer, WIDTH, HEIGHT, "zbuffer.tga");
 
     // AO map (no flip)
@@ -285,6 +373,6 @@ int main(int argc, char** argv) {
     final_img.write_tga_file("final.tga");
 
     print_render_stats();
-    std::cerr << "Saved: phong.tga, zbuffer.tga, ao.tga, final.tga\n";
+    std::cerr << "Saved: phong.tga (with eyes), zbuffer.tga (no eyes), ao.tga, final.tga (with eyes)\n";
     return 0;
 }

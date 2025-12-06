@@ -1,10 +1,13 @@
+// ================================================================
+// geometry.h - Геометрические типы и операции (векторы, матрицы)
+// ================================================================
 #pragma once
 #include <cmath>
 #include <cassert>
 #include <iostream>
 
 // ================================================================
-//  Generic vec<n>
+//  Generic vec<n> - Обобщённый вектор размерности n
 // ================================================================
 template<int n>
 struct vec {
@@ -21,7 +24,7 @@ struct vec {
     }
 };
 
-// vec2 specialization
+// Специализация для vec2
 template<>
 struct vec<2> {
     double x = 0, y = 0;
@@ -36,7 +39,7 @@ struct vec<2> {
     }
 };
 
-// vec3 specialization
+// Специализация для vec3
 template<>
 struct vec<3> {
     double x = 0, y = 0, z = 0;
@@ -51,10 +54,10 @@ struct vec<3> {
     }
 };
 
-// vec4 specialization (compatible with generic vec storage)
+// Специализация для vec4 (совместима с generic хранилищем)
 template<>
 struct vec<4> {
-    double data[4] = { 0,0,0,0 };
+    double data[4] = { 0, 0, 0, 0 };
 
     double& operator[](int i) {
         assert(i >= 0 && i < 4);
@@ -65,7 +68,7 @@ struct vec<4> {
         return data[i];
     }
 
-    // convenience accessors (note: not references to avoid aliasing issues)
+    // Удобные методы доступа (возвращают копии, чтобы избежать проблем с алиасингом)
     double x() const { return data[0]; }
     double y() const { return data[1]; }
     double z() const { return data[2]; }
@@ -75,66 +78,67 @@ struct vec<4> {
     vec<3> xyz() const { return vec<3>{ data[0], data[1], data[2] }; }
 };
 
+// Псевдонимы для удобства
 typedef vec<2> vec2;
 typedef vec<3> vec3;
 typedef vec<4> vec4;
 
 // ================================================================
-//  Basic vec operations
+//  Базовые операции с векторами
 // ================================================================
 template<int n>
 vec<n> operator+(const vec<n>& a, const vec<n>& b) {
-    vec<n> r;
-    for (int i = 0; i < n; ++i) r[i] = a[i] + b[i];
-    return r;
+    vec<n> result;
+    for (int i = 0; i < n; ++i) result[i] = a[i] + b[i];
+    return result;
 }
 
 template<int n>
 vec<n> operator-(const vec<n>& a, const vec<n>& b) {
-    vec<n> r;
-    for (int i = 0; i < n; ++i) r[i] = a[i] - b[i];
-    return r;
+    vec<n> result;
+    for (int i = 0; i < n; ++i) result[i] = a[i] - b[i];
+    return result;
 }
 
 template<int n>
-vec<n> operator*(const vec<n>& a, double v) {
-    vec<n> r;
-    for (int i = 0; i < n; ++i) r[i] = a[i] * v;
-    return r;
+vec<n> operator*(const vec<n>& a, double scalar) {
+    vec<n> result;
+    for (int i = 0; i < n; ++i) result[i] = a[i] * scalar;
+    return result;
 }
 
 template<int n>
-vec<n> operator*(double v, const vec<n>& a) { return a * v; }
+vec<n> operator*(double scalar, const vec<n>& a) { return a * scalar; }
 
 template<int n>
-vec<n> operator/(const vec<n>& a, double v) {
-    vec<n> r;
-    for (int i = 0; i < n; ++i) r[i] = a[i] / v;
-    return r;
+vec<n> operator/(const vec<n>& a, double scalar) {
+    vec<n> result;
+    for (int i = 0; i < n; ++i) result[i] = a[i] / scalar;
+    return result;
 }
 
-// dot (generic)
+// Скалярное произведение (обобщённое)
 template<int n>
 double dot(const vec<n>& a, const vec<n>& b) {
-    double s = 0;
-    for (int i = 0; i < n; ++i) s += a[i] * b[i];
-    return s;
+    double sum = 0;
+    for (int i = 0; i < n; ++i) sum += a[i] * b[i];
+    return sum;
 }
 
-// length
+// Длина вектора
 template<int n>
 double norm(const vec<n>& a) {
     return std::sqrt(dot(a, a));
 }
 
-// normalized for vec3
+// Нормализация для vec3
 inline vec3 normalized(const vec3& v) {
-    double l = norm<3>(v);
-    if (l == 0) return v;
-    return v / l;
+    double length = norm<3>(v);
+    if (length == 0) return v;
+    return v / length;
 }
 
-// cross product for vec3
+// Векторное произведение для vec3
 inline vec3 cross(const vec3& a, const vec3& b) {
     return vec3{
         a[1] * b[2] - a[2] * b[1],
@@ -144,57 +148,98 @@ inline vec3 cross(const vec3& a, const vec3& b) {
 }
 
 // ================================================================
-//  Matrix
+//  Матрицы
 // ================================================================
-template<int nrows, int ncols>
+template<int n_rows, int n_cols>
 struct mat {
-    vec<ncols> rows[nrows];
+    vec<n_cols> rows[n_rows];
 
-    vec<ncols>& operator[](int r) { assert(r >= 0 && r < nrows); return rows[r]; }
-    const vec<ncols>& operator[](int r) const { assert(r >= 0 && r < nrows); return rows[r]; }
-
-    static mat<nrows, ncols> identity() {
-        mat<nrows, ncols> M;
-        for (int r = 0; r < nrows; ++r)
-            for (int c = 0; c < ncols; ++c)
-                M[r][c] = (r == c ? 1.0 : 0.0);
-        return M;
+    vec<n_cols>& operator[](int row) {
+        assert(row >= 0 && row < n_rows);
+        return rows[row];
     }
 
-    mat<ncols, nrows> transpose() const {
-        mat<ncols, nrows> R;
-        for (int r = 0; r < nrows; ++r)
-            for (int c = 0; c < ncols; ++c)
-                R[c][r] = rows[r][c];
-        return R;
+    const vec<n_cols>& operator[](int row) const {
+        assert(row >= 0 && row < n_rows);
+        return rows[row];
+    }
+
+    static mat<n_rows, n_cols> identity() {
+        mat<n_rows, n_cols> result;
+        for (int r = 0; r < n_rows; ++r)
+            for (int c = 0; c < n_cols; ++c)
+                result[r][c] = (r == c ? 1.0 : 0.0);
+        return result;
+    }
+
+    mat<n_cols, n_rows> transpose() const {
+        mat<n_cols, n_rows> result;
+        for (int r = 0; r < n_rows; ++r)
+            for (int c = 0; c < n_cols; ++c)
+                result[c][r] = rows[r][c];
+        return result;
     }
 };
 
-// mat * vec
-template<int nrows, int ncols>
-vec<nrows> operator*(const mat<nrows, ncols>& M, const vec<ncols>& v) {
-    vec<nrows> r;
-    for (int i = 0; i < nrows; ++i)
-        r[i] = dot<ncols>(M[i], v);
-    return r;
+// Умножение матрицы на вектор
+template<int n_rows, int n_cols>
+vec<n_rows> operator*(const mat<n_rows, n_cols>& M, const vec<n_cols>& v) {
+    vec<n_rows> result;
+    for (int i = 0; i < n_rows; ++i)
+        result[i] = dot<n_cols>(M[i], v);
+    return result;
 }
 
-// mat * mat
+// Умножение матрицы на матрицу
 template<int R1, int C1, int C2>
 mat<R1, C2> operator*(const mat<R1, C1>& A, const mat<C1, C2>& B) {
-    mat<R1, C2> R;
+    mat<R1, C2> result;
     for (int i = 0; i < R1; ++i)
         for (int j = 0; j < C2; ++j) {
-            R[i][j] = 0;
+            result[i][j] = 0;
             for (int k = 0; k < C1; ++k)
-                R[i][j] += A[i][k] * B[k][j];
+                result[i][j] += A[i][k] * B[k][j];
         }
-    return R;
+    return result;
 }
 
-// stream output
+// Вывод матрицы в поток
 template<int r, int c>
 std::ostream& operator<<(std::ostream& out, const mat<r, c>& M) {
     for (int i = 0; i < r; ++i) out << M[i] << "\n";
     return out;
+}
+
+// ----------------------------------------------------------------
+// Вспомогательные конструкторы и унарный минус для векторов
+// ----------------------------------------------------------------
+
+inline vec2 make_vec2(double x, double y) {
+    vec2 result;
+    result.x = x;
+    result.y = y;
+    return result;
+}
+
+inline vec3 make_vec3(double x, double y, double z) {
+    vec3 result;
+    result.x = x;
+    result.y = y;
+    result.z = z;
+    return result;
+}
+
+inline vec4 make_vec4(double x, double y, double z, double w) {
+    vec4 result;
+    result[0] = x;
+    result[1] = y;
+    result[2] = z;
+    result[3] = w;
+    return result;
+}
+
+// Унарный минус для любого vec<n>
+template<int n>
+vec<n> operator-(const vec<n>& a) {
+    return a * -1.0;
 }

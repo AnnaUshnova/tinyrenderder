@@ -5,6 +5,19 @@ D:\cg\lab3\tinyrenderder\model.h(11,43): warning C4267: return: преобраз
 D:\cg\lab3\tinyrenderder\model.h(12,50): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "main.cpp")
   
-model.obj : warning LNK4099: "" PDB не найден с "model.obj" или на ""; компоновка объекта выполняется как при отсутствии отладочных данных
-tgaimage.obj : warning LNK4099: "" PDB не найден с "tgaimage.obj" или на ""; компоновка объекта выполняется как при отсутствии отладочных данных
+  model.cpp
+D:\cg\lab3\tinyrenderder\model.h(11,43): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "model.cpp")
+  
+D:\cg\lab3\tinyrenderder\model.h(12,50): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "model.cpp")
+  
+D:\cg\lab3\tinyrenderder\model.cpp(184,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(183,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(204,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(203,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(213,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(212,14): warning C4244: аргумент: преобразование "double" в "const int", возможна потеря данных
+  our_gl.cpp
+  Создание кода...
   tinyrenderder.vcxproj -> D:\cg\lab3\tinyrenderder\x64\Debug\tinyrenderder.exe

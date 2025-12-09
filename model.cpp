@@ -1,18 +1,18 @@
-#include <fstream>
-#include <sstream>
 #include "model.h"
+#include <iostream>
+#include <filesystem>
 
 Model::Model(const std::string filename) {
-    std::ifstream in(filename);
-    if (in.fail()) {
-        std::cerr << "Failed to open OBJ: " << filename << std::endl;
-        return;
-    }
+    // Сохраняем базовую директорию для текстур
+    std::filesystem::path path(filename);
+    baseDirectory = path.parent_path().string();
 
-    // ensure tangents vector size
+    // Загружаем модель через Assimp
+    loadModel(filename);
+
+    // Вычисляем тангенсы (остается как было, но после загрузки данных)
     tangents.assign(verts.size(), vec3{ 0,0,0 });
 
-    // accumulate face tangents
     for (int f = 0; f < nfaces(); ++f) {
         int i0 = facet_vrt[f * 3 + 0];
         int i1 = facet_vrt[f * 3 + 1];
@@ -43,123 +43,119 @@ Model::Model(const std::string filename) {
         tangents[i2] = tangents[i2] + tangent;
     }
 
-    // normalize tangents
-    for (size_t i = 0; i < tangents.size(); ++i) {
+    // Нормализуем тангенсы
+    for (size_t i = 0; i < tangents.size(); i++) {
         tangents[i] = normalized(tangents[i]);
     }
+}
 
-    std::string line;
-    while (std::getline(in, line)) {
-        std::istringstream iss(line);
-        char trash;
+void Model::loadModel(const std::string& path) {
+    // Загружаем модель через Assimp
+    scene = importer.ReadFile(path,
+        aiProcess_Triangulate |           // Треугольники
+        aiProcess_FlipUVs |               // Переворачиваем UV
+        aiProcess_GenNormals |            // Генерируем нормали
+        aiProcess_CalcTangentSpace |      // Вычисляем тангенты
+        aiProcess_JoinIdenticalVertices); // Объединяем одинаковые вершины
 
-        // ----------------------------------------------------------------------
-        // vertices
-        // ----------------------------------------------------------------------
-        if (!line.compare(0, 2, "v ")) {
-            iss >> trash;
-            vec3 v;
-            iss >> v.x >> v.y >> v.z;
-            verts.push_back(v);
-        }
-
-        // ----------------------------------------------------------------------
-        // vertex normals
-        // ----------------------------------------------------------------------
-        else if (!line.compare(0, 3, "vn ")) {
-            iss >> trash >> trash;
-            vec3 n;
-            iss >> n.x >> n.y >> n.z;
-            norms.push_back(normalized(n));
-        }
-
-        // ----------------------------------------------------------------------
-        // texture coordinates
-        // ----------------------------------------------------------------------
-        else if (!line.compare(0, 3, "vt ")) {
-            iss >> trash >> trash;
-            vec2 uv;
-            iss >> uv.x >> uv.y;
-            tex.push_back({ uv.x, 1 - uv.y });   // flip V
-        }
-
-        // ----------------------------------------------------------------------
-        // faces: f v/t/n v/t/n v/t/n
-        // ----------------------------------------------------------------------
-        else if (!line.compare(0, 2, "f ")) {
-            iss >> trash;
-            int v, t, n;
-            int cnt = 0;
-            while (iss >> v >> trash >> t >> trash >> n) {
-                facet_vrt.push_back(v - 1);
-                facet_tex.push_back(t - 1);
-                facet_nrm.push_back(n - 1);
-                cnt++;
-            }
-            if (cnt != 3) {
-                std::cerr << "Error: OBJ file must be triangulated\n";
-                return;
-            }
-        }
+    if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+        std::cerr << "ASSIMP ERROR: " << importer.GetErrorString() << std::endl;
+        return;
     }
+
+    // Рекурсивно обрабатываем все меши
+    processNode(scene->mRootNode);
 
     std::cerr << "# v# " << nverts() << " f# " << nfaces() << std::endl;
 
-    // compute per-vertex tangents (after parsing!)
-    tangents.assign(verts.size(), vec3{ 0,0,0 });
+    // Загружаем текстуры
+    // Пробуем стандартные имена текстур (как в старом коде)
+    std::filesystem::path modelPath(path);
+    std::string baseName = modelPath.stem().string();
+    std::string dir = modelPath.parent_path().string();
 
-    for (int f = 0; f < nfaces(); f++) {
-        int i0 = facet_vrt[3 * f + 0];
-        int i1 = facet_vrt[3 * f + 1];
-        int i2 = facet_vrt[3 * f + 2];
+    if (!dir.empty()) dir += "/";
 
-        vec3 v0 = verts[i0];
-        vec3 v1 = verts[i1];
-        vec3 v2 = verts[i2];
-
-        vec2 uv0 = tex[facet_tex[3 * f + 0]];
-        vec2 uv1 = tex[facet_tex[3 * f + 1]];
-        vec2 uv2 = tex[facet_tex[3 * f + 2]];
-
-        vec3 e1 = v1 - v0;
-        vec3 e2 = v2 - v0;
-        vec2 duv1 = uv1 - uv0;
-        vec2 duv2 = uv2 - uv0;
-
-        double r = (duv1.x * duv2.y - duv1.y * duv2.x);
-        if (std::abs(r) < 1e-9) continue;
-        r = 1.0 / r;
-
-        vec3 t = (e1 * duv2.y - e2 * duv1.y) * r;
-
-        tangents[i0] = tangents[i0] + t;
-        tangents[i1] = tangents[i1] + t;
-        tangents[i2] = tangents[i2] + t;
+    // Диффузная текстура
+    if (!diffusemap.read_tga_file((dir + baseName + "_diffuse.tga").c_str())) {
+        std::cerr << "Diffuse texture not found: " << (dir + baseName + "_diffuse.tga") << std::endl;
     }
 
-    for (size_t i = 0; i < tangents.size(); i++)
-        tangents[i] = normalized(tangents[i]);
+    // Нормал-мап
+    if (!normalmap.read_tga_file((dir + baseName + "_nm.tga").c_str())) {
+        std::cerr << "Normal map not found: " << (dir + baseName + "_nm.tga") << std::endl;
+    }
 
-
-    // load textures ------------------------------------------------------------
-    auto load_texture = [&](const std::string& suffix, TGAImage& img) {
-        size_t dot = filename.find_last_of(".");
-        if (dot == std::string::npos) return;
-        std::string texfile = filename.substr(0, dot) + suffix;
-        bool ok = img.read_tga_file(texfile.c_str());
-        std::cerr << "texture file " << texfile << " loading "
-            << (ok ? "ok" : "failed") << std::endl;
-       // img.flip_vertically();
-        };
-
-    load_texture("_diffuse.tga", diffusemap);
-    load_texture("_nm.tga", normalmap);
-    load_texture("_spec.tga", specmap);
+    // Specular карта
+    if (!specmap.read_tga_file((dir + baseName + "_spec.tga").c_str())) {
+        std::cerr << "Specular map not found: " << (dir + baseName + "_spec.tga") << std::endl;
+    }
 }
 
-// -----------------------------------------------------------------------------
-// getters
-// -----------------------------------------------------------------------------
+void Model::processNode(aiNode* node) {
+    // Обрабатываем все меши текущего узла
+    for (unsigned int i = 0; i < node->mNumMeshes; i++) {
+        aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
+        processMesh(mesh, scene);
+    }
+
+    // Рекурсивно обрабатываем дочерние узлы
+    for (unsigned int i = 0; i < node->mNumChildren; i++) {
+        processNode(node->mChildren[i]);
+    }
+}
+
+void Model::processMesh(aiMesh* mesh, const aiScene* scene) {
+    // Начальный индекс для текущего меша
+    size_t vertexStart = verts.size();
+
+    // Вершины
+    for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
+        vec3 vertex;
+        vertex.x = mesh->mVertices[i].x;
+        vertex.y = mesh->mVertices[i].y;
+        vertex.z = mesh->mVertices[i].z;
+        verts.push_back(vertex);
+
+        // Нормали
+        if (mesh->mNormals) {
+            vec3 normal;
+            normal.x = mesh->mNormals[i].x;
+            normal.y = mesh->mNormals[i].y;
+            normal.z = mesh->mNormals[i].z;
+            norms.push_back(normalized(normal));
+        }
+        else {
+            norms.push_back(vec3{ 0,0,1 });
+        }
+
+        // Текстурные координаты (берем первый набор UV)
+        if (mesh->mTextureCoords[0]) {
+            vec2 uv;
+            uv.x = mesh->mTextureCoords[0][i].x;
+            uv.y = mesh->mTextureCoords[0][i].y;
+            tex.push_back(uv);
+        }
+        else {
+            tex.push_back(vec2{ 0,0 });
+        }
+    }
+
+    // Индексы (грани) - преобразуем в плоский массив
+    for (unsigned int i = 0; i < mesh->mNumFaces; i++) {
+        aiFace face = mesh->mFaces[i];
+        // Меш уже триангулирован (благодаря aiProcess_Triangulate)
+        for (unsigned int j = 0; j < face.mNumIndices; j++) {
+            // Смещаем индексы на начало текущего меша
+            int index = vertexStart + face.mIndices[j];
+            facet_vrt.push_back(index);
+            facet_tex.push_back(index);
+            facet_nrm.push_back(index);
+        }
+    }
+}
+
+// Методы доступа остаются БЕЗ ИЗМЕНЕНИЙ (как в вашем старом коде)
 
 vec3 Model::vert(int i) const {
     return verts[i];
@@ -175,7 +171,6 @@ vec3 Model::normal(int iface, int nthvert) const {
 
 vec3 Model::normal(const vec2& uv) const {
     if (normalmap.width() == 0) {
-        // Если карты нормалей нет, возвращаем (0,0,1)
         return vec3{ 0, 0, 1 };
     }
 
@@ -196,8 +191,6 @@ vec2 Model::uv(int iface, int nthvert) const {
     return tex[facet_tex[iface * 3 + nthvert]];
 }
 
-// diffuse lookup --------------------------------------------------------------
-
 TGAColor Model::diffuse(const vec2& uv) const {
     return diffusemap.get(
         uv.x * diffusemap.width(),
@@ -205,14 +198,10 @@ TGAColor Model::diffuse(const vec2& uv) const {
     );
 }
 
-// specular coefficient --------------------------------------------------------
-
 float Model::specular(const vec2& uv) const {
     TGAColor c = specmap.get(
         uv.x * specmap.width(),
         uv.y * specmap.height()
     );
-    return c[0] / 1.0f;   // takes R-channel as shininess
+    return c[0] / 1.0f;
 }
-
-

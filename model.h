@@ -1,12 +1,19 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <memory>
 #include "geometry.h"
 #include "tgaimage.h"
+
+// Включаем заголовки Assimp
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#include <assimp/Importer.hpp>
 
 class Model {
 public:
     Model(const std::string filename);
+    ~Model() = default;
 
     int nverts() const { return verts.size(); }
     int nfaces() const { return facet_vrt.size() / 3; }
@@ -28,21 +35,29 @@ public:
     float specular(const vec2& uv) const;
 
 private:
-    // vertex attributes
+    // Загрузка через Assimp
+    void loadModel(const std::string& path);
+    void processNode(aiNode* node);
+    void processMesh(aiMesh* mesh, const aiScene* scene);
+
+    // Векторные данные
     std::vector<vec3> verts;
     std::vector<vec3> norms;
     std::vector<vec2> tex;
-
-    // tangents per-vertex (object space)
     std::vector<vec3> tangents;
 
-    // face indices
+    // Индексы
     std::vector<int> facet_vrt;
     std::vector<int> facet_tex;
     std::vector<int> facet_nrm;
 
-    // texture maps (must exist!)
+    // Текстуры
     TGAImage diffusemap;
     TGAImage normalmap;
     TGAImage specmap;
+
+    // Импортер Assimp
+    Assimp::Importer importer;
+    const aiScene* scene = nullptr;
+    std::string baseDirectory; // базовая директория для текстур
 };

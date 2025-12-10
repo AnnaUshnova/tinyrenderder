@@ -59,3 +59,28 @@ void rasterize(const Triangle& clip, const IShader& shader, TGAImage& framebuffe
 
 // Отладочная информация
 void print_render_stats();
+
+// ================================================================
+// Frustum Culling Functions
+// ================================================================
+
+// Структура фрустума (пирамиды видимости)
+struct Frustum {
+    Plane planes[6]; // left, right, bottom, top, near, far
+
+    enum PlaneIndex {
+        LEFT = 0,
+        RIGHT = 1,
+        BOTTOM = 2,
+        TOP = 3,
+        NEAR = 4,
+        FAR = 5
+    };
+
+    // Создание фрустума из матрицы вида-проекции
+    static Frustum createFromMatrix(const mat<4, 4>& matrix);
+
+    // Проверка пересечения AABB с фрустумом
+    bool intersects(const AABB& aabb) const;
+
+};

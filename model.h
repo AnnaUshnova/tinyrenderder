@@ -81,6 +81,14 @@ public:
     int nfaces() const { return getIndexCount() / 3; }
     bool hasNormalMap() const { return materials.size() > 0 && materials[0].hasNormal(); }
 
+    // AABB модели в локальных координатах
+    const AABB& getLocalAABB() const { return localAABB; }
+
+    // ¬ычисление AABB в мировых координатах
+    AABB getWorldAABB(const mat<4, 4>& modelMatrix) const {
+        return localAABB.transform(modelMatrix);
+    }
+
 private:
     // «агрузка через Assimp
     bool loadModel(const std::string& path);
@@ -111,4 +119,7 @@ private:
 
     // ƒружественный класс ModelManager
     friend class ModelManager;
+
+    AABB localAABB;  // AABB в локальных координатах модели
+    void computeAABB();  // ¬ычисление AABB при загрузке
 };

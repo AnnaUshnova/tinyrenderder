@@ -362,7 +362,7 @@ static double compute_ssao_at(const std::vector<double>& zbuffer,
 //  Основная функция
 // ================================================================
 int main(int argc, char** argv) {
-    std::cout << "=== Renderer with ModelManager ===" << std::endl;
+    std::cout << "=== Renderer with ModelManager and Frustum Culling ===" << std::endl;
 
     // Инициализация ModelManager
     auto& modelManager = ModelManager::getInstance();
@@ -411,56 +411,131 @@ int main(int argc, char** argv) {
     vec3 fill_light_dir = normalized(make_vec3(-0.3, 0.5, 0.2));
     vec3 rim_light_dir = normalized(make_vec3(-1.0, 0.8, -1.5));
 
-    // Шейдер для головы
-    PhongShader head_shader(head_model.get());
-    head_shader.initLightDirections(key_light_dir, fill_light_dir, rim_light_dir);
+    // ================================================================
+    // FRUSTUM CULLING - Часть 1: Создание фрустума
+    // ================================================================
 
-    // Информация о модели
-    std::cout << "\nRendering head model:" << std::endl;
-    std::cout << "  Vertices: " << head_model->nverts() << std::endl;
-    std::cout << "  Faces: " << head_model->nfaces() << std::endl;
-    std::cout << "  SubMeshes: " << head_model->getSubMeshCount() << std::endl;
-    std::cout << "  Has normal map: " << (head_model->hasNormalMap() ? "Yes" : "No") << std::endl;
+    // Получаем матрицу вида-проекции для создания фрустума
+    mat<4, 4> viewProjection = Perspective * ModelView;
+    Frustum frustum = Frustum::createFromMatrix(viewProjection);
 
-    // Рендеринг головы
-    std::cout << "Rendering head..." << std::endl;
-    for (int face = 0; face < head_model->nfaces(); ++face) {
-        vec4 clip_space_triangle[3];
-        for (int vertex = 0; vertex < 3; ++vertex) {
-            clip_space_triangle[vertex] = head_shader.vertex(face, vertex);
+    // Матрицы модели (единичные, так как модели уже в правильном положении)
+    mat<4, 4> headModelMatrix = mat<4, 4>::identity();
+    mat<4, 4> eyeModelMatrix = mat<4, 4>::identity();
+
+    // Статистика frustum culling
+    int models_culled = 0;
+    int models_rendered = 0;
+    int total_triangles = 0;
+    int culled_triangles = 0;
+
+    // ================================================================
+    // РЕНДЕРИНГ ГОЛОВЫ с Frustum Culling
+    // ================================================================
+
+    // Проверка видимости головы
+    AABB headWorldAABB = head_model->getWorldAABB(headModelMatrix);
+    bool headVisible = frustum.intersects(headWorldAABB);
+
+    if (headVisible) {
+        models_rendered++;
+
+        // Информация о модели
+        std::cout << "\nRendering head model (VISIBLE):" << std::endl;
+        std::cout << "  Vertices: " << head_model->nverts() << std::endl;
+        std::cout << "  Faces: " << head_model->nfaces() << std::endl;
+        std::cout << "  SubMeshes: " << head_model->getSubMeshCount() << std::endl;
+        std::cout << "  Has normal map: " << (head_model->hasNormalMap() ? "Yes" : "No") << std::endl;
+
+        // Шейдер для головы
+        PhongShader head_shader(head_model.get());
+        head_shader.initLightDirections(key_light_dir, fill_light_dir, rim_light_dir);
+
+        // Рендеринг головы
+        std::cout << "Rendering head..." << std::endl;
+        total_triangles += head_model->nfaces();
+
+        for (int face = 0; face < head_model->nfaces(); ++face) {
+            vec4 clip_space_triangle[3];
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                clip_space_triangle[vertex] = head_shader.vertex(face, vertex);
+            }
+            rasterize(clip_space_triangle, head_shader, framebuffer);
         }
-        rasterize(clip_space_triangle, head_shader, framebuffer);
+    }
+    else {
+        models_culled++;
+        culled_triangles += head_model->nfaces();
+        std::cout << "\nHead model CULLED by frustum" << std::endl;
+        std::cout << "  AABB Center: (" << headWorldAABB.getCenter().x << ", "
+            << headWorldAABB.getCenter().y << ", " << headWorldAABB.getCenter().z << ")" << std::endl;
+        std::cout << "  AABB Size: (" << headWorldAABB.getSize().x << ", "
+            << headWorldAABB.getSize().y << ", " << headWorldAABB.getSize().z << ")" << std::endl;
     }
 
     // Сохраняем Z-буфер до рендеринга глаз
     std::vector<double> zbuffer_before_eyes = zbuffer;
 
-    // Шейдер для глаз
-    EyeShader eye_shader(eye_model.get());
-    eye_shader.initLightDirections(key_light_dir, rim_light_dir);
+    // ================================================================
+    // РЕНДЕРИНГ ГЛАЗ с Frustum Culling
+    // ================================================================
 
-    // Информация о модели глаз
-    std::cout << "\nRendering eye model:" << std::endl;
-    std::cout << "  Vertices: " << eye_model->nverts() << std::endl;
-    std::cout << "  Faces: " << eye_model->nfaces() << std::endl;
+    // Проверка видимости глаз
+    AABB eyeWorldAABB = eye_model->getWorldAABB(eyeModelMatrix);
+    bool eyesVisible = frustum.intersects(eyeWorldAABB);
 
-    // Рендеринг глаз
-    std::cout << "Rendering eyes..." << std::endl;
-    for (int face = 0; face < eye_model->nfaces(); ++face) {
-        vec4 clip_space_triangle[3];
-        for (int vertex = 0; vertex < 3; ++vertex) {
-            clip_space_triangle[vertex] = eye_shader.vertex(face, vertex);
+    if (eyesVisible) {
+        models_rendered++;
+
+        // Информация о модели глаз
+        std::cout << "\nRendering eye model (VISIBLE):" << std::endl;
+        std::cout << "  Vertices: " << eye_model->nverts() << std::endl;
+        std::cout << "  Faces: " << eye_model->nfaces() << std::endl;
+
+        // Шейдер для глаз
+        EyeShader eye_shader(eye_model.get());
+        eye_shader.initLightDirections(key_light_dir, rim_light_dir);
+
+        // Рендеринг глаз
+        std::cout << "Rendering eyes..." << std::endl;
+        total_triangles += eye_model->nfaces();
+
+        for (int face = 0; face < eye_model->nfaces(); ++face) {
+            vec4 clip_space_triangle[3];
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                clip_space_triangle[vertex] = eye_shader.vertex(face, vertex);
+            }
+            rasterize(clip_space_triangle, eye_shader, framebuffer);
         }
-        rasterize(clip_space_triangle, eye_shader, framebuffer);
-    }
-
-    // Сохраняем результат с глазами
-    TGAImage phong_result = framebuffer;
-    if (phong_result.write_tga_file("phong.tga")) {
-        std::cout << "Saved: phong.tga" << std::endl;
     }
     else {
-        std::cerr << "ERROR: Failed to save phong.tga" << std::endl;
+        models_culled++;
+        culled_triangles += eye_model->nfaces();
+        std::cout << "\nEye model CULLED by frustum" << std::endl;
+        std::cout << "  AABB Center: (" << eyeWorldAABB.getCenter().x << ", "
+            << eyeWorldAABB.getCenter().y << ", " << eyeWorldAABB.getCenter().z << ")" << std::endl;
+        std::cout << "  AABB Size: (" << eyeWorldAABB.getSize().x << ", "
+            << eyeWorldAABB.getSize().y << ", " << eyeWorldAABB.getSize().z << ")" << std::endl;
+    }
+
+    // ================================================================
+    // СОХРАНЕНИЕ РЕЗУЛЬТАТОВ
+    // ================================================================
+
+    // Сохраняем результат с глазами (если что-то было отрендерено)
+    if (models_rendered > 0) {
+        TGAImage phong_result = framebuffer;
+        if (phong_result.write_tga_file("phong.tga")) {
+            std::cout << "\nSaved: phong.tga" << std::endl;
+        }
+        else {
+            std::cerr << "ERROR: Failed to save phong.tga" << std::endl;
+        }
+    }
+    else {
+        std::cout << "\nNo models rendered, skipping phong.tga" << std::endl;
+        // Создаем пустой фреймбуфер для продолжения
+        framebuffer = TGAImage(WIDTH, HEIGHT, TGAImage::RGB);
     }
 
     // Восстанавливаем Z-буфер (без глаз) для SSAO
@@ -488,34 +563,63 @@ int main(int argc, char** argv) {
         std::cerr << "ERROR: Failed to save ao.tga" << std::endl;
     }
 
-    // Финальная композиция: Phong + AO
-    std::cout << "Compositing final image..." << std::endl;
-    TGAImage final_result(WIDTH, HEIGHT, TGAImage::RGB);
-    for (int y = 0; y < HEIGHT; ++y) {
-        for (int x = 0; x < WIDTH; ++x) {
-            TGAColor phong_color = phong_result.get(x, y);
-            TGAColor ao_color = ao_map.get(x, y);
+    // Финальная композиция: Phong + AO (если есть phong результат)
+    if (models_rendered > 0) {
+        std::cout << "Compositing final image..." << std::endl;
+        TGAImage final_result(WIDTH, HEIGHT, TGAImage::RGB);
+        for (int y = 0; y < HEIGHT; ++y) {
+            for (int x = 0; x < WIDTH; ++x) {
+                TGAColor phong_color = framebuffer.get(x, y);
+                TGAColor ao_color = ao_map.get(x, y);
 
-            double ao_factor = ao_color[0] / 255.0;
+                double ao_factor = ao_color[0] / 255.0;
 
-            TGAColor final_color;
-            final_color[0] = (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor);
-            final_color[1] = (unsigned char)std::min(255.0, (double)phong_color[1] * ao_factor);
-            final_color[2] = (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor);
+                TGAColor final_color;
+                final_color[0] = (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor);
+                final_color[1] = (unsigned char)std::min(255.0, (double)phong_color[1] * ao_factor);
+                final_color[2] = (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor);
 
-            final_result.set(x, y, final_color);
+                final_result.set(x, y, final_color);
+            }
+        }
+
+        if (final_result.write_tga_file("final.tga")) {
+            std::cout << "Saved: final.tga" << std::endl;
+        }
+        else {
+            std::cerr << "ERROR: Failed to save final.tga" << std::endl;
         }
     }
-
-    if (final_result.write_tga_file("final.tga")) {
-        std::cout << "Saved: final.tga" << std::endl;
-    }
     else {
-        std::cerr << "ERROR: Failed to save final.tga" << std::endl;
+        std::cout << "No models rendered, skipping final.tga" << std::endl;
     }
 
-    // Вывод статистики
+    // ================================================================
+    // СТАТИСТИКА И ВЫВОД РЕЗУЛЬТАТОВ
+    // ================================================================
+
+    // Вывод статистики рендеринга
     print_render_stats();
+
+    // Статистика Frustum Culling
+    std::cout << "\n=== Frustum Culling Statistics ===" << std::endl;
+    std::cout << "  Total models: " << (models_rendered + models_culled) << std::endl;
+    std::cout << "  Models rendered: " << models_rendered << std::endl;
+    std::cout << "  Models culled: " << models_culled << std::endl;
+    std::cout << "  Total triangles: " << total_triangles << std::endl;
+    std::cout << "  Culled triangles: " << culled_triangles << std::endl;
+    std::cout << "  Triangle culling efficiency: "
+        << (culled_triangles * 100.0 / (total_triangles + culled_triangles)) << "%" << std::endl;
+
+    // Информация о камере для отладки
+    std::cout << "\nCamera Information:" << std::endl;
+    std::cout << "  Position: (" << camera_position.x << ", "
+        << camera_position.y << ", " << camera_position.z << ")" << std::endl;
+    std::cout << "  Target: (" << camera_target.x << ", "
+        << camera_target.y << ", " << camera_target.z << ")" << std::endl;
+    std::cout << "  FOV: 60 degrees" << std::endl;
+    std::cout << "  Near plane: 0.1" << std::endl;
+    std::cout << "  Far plane: 100.0" << std::endl;
 
     // Финальная статистика ModelManager
     std::cout << "\n=== Final ModelManager Statistics ===" << std::endl;
@@ -523,10 +627,16 @@ int main(int argc, char** argv) {
 
     std::cout << "\n=== Render Complete ===" << std::endl;
     std::cout << "Files saved:" << std::endl;
-    std::cout << "  - phong.tga (with eyes)" << std::endl;
     std::cout << "  - zbuffer.tga (without eyes)" << std::endl;
     std::cout << "  - ao.tga (ambient occlusion)" << std::endl;
-    std::cout << "  - final.tga (phong + ao)" << std::endl;
+
+    if (models_rendered > 0) {
+        std::cout << "  - phong.tga (with eyes)" << std::endl;
+        std::cout << "  - final.tga (phong + ao)" << std::endl;
+    }
+    else {
+        std::cout << "  - [phong.tga and final.tga skipped - no visible models]" << std::endl;
+    }
 
     return 0;
 }

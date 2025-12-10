@@ -11,6 +11,35 @@ Model::Model(const std::string& filename)
     directory = path.parent_path().string();
 }
 
+
+void Model::computeAABB() {
+    if (vertices.empty()) {
+        localAABB = AABB(vec3{ 0,0,0 }, vec3{ 0,0,0 });
+        return;
+    }
+
+    vec3 min = vec3{ 1e9, 1e9, 1e9 };
+    vec3 max = vec3{ -1e9, -1e9, -1e9 };
+
+    for (const auto& vertex : vertices) {
+        min.x = std::min(min.x, vertex.position.x);
+        min.y = std::min(min.y, vertex.position.y);
+        min.z = std::min(min.z, vertex.position.z);
+
+        max.x = std::max(max.x, vertex.position.x);
+        max.y = std::max(max.y, vertex.position.y);
+        max.z = std::max(max.z, vertex.position.z);
+    }
+
+    // Добавляем небольшой запас
+    vec3 margin = (max - min) * 0.01;
+    localAABB = AABB(min - margin, max + margin);
+
+    std::cout << "Model AABB: min(" << min.x << ", " << min.y << ", " << min.z
+        << "), max(" << max.x << ", " << max.y << ", " << max.z << ")" << std::endl;
+}
+
+
 // Основной метод загрузки
 bool Model::load() {
     if (isLoaded) {
@@ -31,6 +60,8 @@ bool Model::load() {
 
     // Вычисляем тангенсы если их нет
     computeTangentsIfNeeded();
+
+    computeAABB();  // Добавить эту строку
 
     isLoaded = true;
     std::cout << "Model loaded successfully. Vertices: " << vertices.size()

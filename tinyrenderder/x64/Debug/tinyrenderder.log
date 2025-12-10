@@ -1,4 +1,17 @@
-﻿  model.cpp
+﻿  main.cpp
+D:\cg\lab3\tinyrenderder\model.h(56,54): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "main.cpp")
+  
+D:\cg\lab3\tinyrenderder\model.h(57,52): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "main.cpp")
+  
+D:\cg\lab3\tinyrenderder\model.h(58,56): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "main.cpp")
+  
+D:\cg\lab3\tinyrenderder\model.h(59,57): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
+  (компиляция исходного файла "main.cpp")
+  
+  model.cpp
 D:\cg\lab3\tinyrenderder\model.h(56,54): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "model.cpp")
   
@@ -11,9 +24,9 @@ D:\cg\lab3\tinyrenderder\model.h(58,56): warning C4267: return: преобраз
 D:\cg\lab3\tinyrenderder\model.h(59,57): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "model.cpp")
   
-D:\cg\lab3\tinyrenderder\model.cpp(115,38): warning C4267: =: преобразование из "size_t" в "unsigned int"; возможна потеря данных
-D:\cg\lab3\tinyrenderder\model.cpp(122,30): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
-D:\cg\lab3\tinyrenderder\model.cpp(168,41): warning C4267: =: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(146,38): warning C4267: =: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(153,30): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+D:\cg\lab3\tinyrenderder\model.cpp(199,41): warning C4267: =: преобразование из "size_t" в "unsigned int"; возможна потеря данных
   model_manager.cpp
 D:\cg\lab3\tinyrenderder\model.h(56,54): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "model_manager.cpp")
@@ -27,5 +40,6 @@ D:\cg\lab3\tinyrenderder\model.h(58,56): warning C4267: return: преобраз
 D:\cg\lab3\tinyrenderder\model.h(59,57): warning C4267: return: преобразование из "size_t" в "int"; возможна потеря данных
   (компиляция исходного файла "model_manager.cpp")
   
+  our_gl.cpp
   Создание кода...
   tinyrenderder.vcxproj -> D:\cg\lab3\tinyrenderder\x64\Debug\tinyrenderder.exe

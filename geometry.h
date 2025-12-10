@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cassert>
 #include <iostream>
+#include <array>  // Добавлено для std::array
 
 // ================================================================
 //  Generic vec<n> - Обобщённый вектор размерности n
@@ -243,3 +244,85 @@ template<int n>
 vec<n> operator-(const vec<n>& a) {
     return a * -1.0;
 }
+
+// ================================================================
+// Frustum Culling - Плоскости и AABB
+// ================================================================
+
+// Плоскость в виде Ax + By + Cz + D = 0
+struct Plane {
+    vec3 normal;
+    double d;
+
+    Plane() : normal(vec3{ 0,0,1 }), d(0) {}
+    Plane(const vec3& n, const vec3& point) {
+        normal = normalized(n);
+        d = -dot(normal, point);
+    }
+
+    // Расстояние от точки до плоскости
+    double distance(const vec3& point) const {
+        return dot(normal, point) + d;
+    }
+};
+
+// Axis-Aligned Bounding Box
+struct AABB {
+    vec3 min;
+    vec3 max;
+
+    AABB() : min(vec3{ 0,0,0 }), max(vec3{ 0,0,0 }) {}
+    AABB(const vec3& min_val, const vec3& max_val) : min(min_val), max(max_val) {}
+
+    vec3 getCenter() const {
+        return (min + max) * 0.5;
+    }
+
+    vec3 getSize() const {
+        return max - min;
+    }
+
+    vec3 getHalfSize() const {
+        return getSize() * 0.5;
+    }
+
+    // Проверка пересечения с другим AABB
+    bool intersects(const AABB& other) const {
+        return (min.x <= other.max.x && max.x >= other.min.x) &&
+            (min.y <= other.max.y && max.y >= other.min.y) &&
+            (min.z <= other.max.z && max.z >= other.min.z);
+    }
+
+    // Трансформация AABB матрицей (приблизительно)
+    AABB transform(const mat<4, 4>& matrix) const {
+        // Массив углов AABB
+        std::array<vec3, 8> corners;
+        corners[0] = vec3{min.x, min.y, min.z};
+        corners[1] = vec3{max.x, min.y, min.z};
+        corners[2] = vec3{min.x, max.y, min.z};
+        corners[3] = vec3{max.x, max.y, min.z};
+        corners[4] = vec3{min.x, min.y, max.z};
+        corners[5] = vec3{max.x, min.y, max.z};
+        corners[6] = vec3{min.x, max.y, max.z};
+        corners[7] = vec3{max.x, max.y, max.z};
+
+        vec3 new_min = vec3{ 1e9, 1e9, 1e9 };
+        vec3 new_max = vec3{ -1e9, -1e9, -1e9 };
+
+        for (int i = 0; i < 8; i++) {
+            const vec3& corner = corners[i];
+            vec4 transformed = matrix * make_vec4(corner.x, corner.y, corner.z, 1.0);
+            vec3 pos = transformed.xyz() / transformed.w();
+
+            new_min.x = std::min(new_min.x, pos.x);
+            new_min.y = std::min(new_min.y, pos.y);
+            new_min.z = std::min(new_min.z, pos.z);
+
+            new_max.x = std::max(new_max.x, pos.x);
+            new_max.y = std::max(new_max.y, pos.y);
+            new_max.z = std::max(new_max.z, pos.z);
+        }
+
+        return AABB(new_min, new_max);
+    }
+};

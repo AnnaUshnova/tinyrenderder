@@ -202,3 +202,73 @@ void print_render_stats() {
         << " z-range=[" << (std::isfinite(min_z) ? std::to_string(min_z) : "inf") << ","
         << (std::isfinite(max_z) ? std::to_string(max_z) : "-inf") << "]\n";
 }
+
+Frustum Frustum::createFromMatrix(const mat<4, 4>& matrix) {
+    Frustum frustum;
+
+    // »звлечение плоскостей из матрицы
+    // Left plane
+    frustum.planes[LEFT].normal.x = matrix[0][3] + matrix[0][0];
+    frustum.planes[LEFT].normal.y = matrix[1][3] + matrix[1][0];
+    frustum.planes[LEFT].normal.z = matrix[2][3] + matrix[2][0];
+    frustum.planes[LEFT].d = matrix[3][3] + matrix[3][0];
+
+    // Right plane
+    frustum.planes[RIGHT].normal.x = matrix[0][3] - matrix[0][0];
+    frustum.planes[RIGHT].normal.y = matrix[1][3] - matrix[1][0];
+    frustum.planes[RIGHT].normal.z = matrix[2][3] - matrix[2][0];
+    frustum.planes[RIGHT].d = matrix[3][3] - matrix[3][0];
+
+    // Bottom plane
+    frustum.planes[BOTTOM].normal.x = matrix[0][3] + matrix[0][1];
+    frustum.planes[BOTTOM].normal.y = matrix[1][3] + matrix[1][1];
+    frustum.planes[BOTTOM].normal.z = matrix[2][3] + matrix[2][1];
+    frustum.planes[BOTTOM].d = matrix[3][3] + matrix[3][1];
+
+    // Top plane
+    frustum.planes[TOP].normal.x = matrix[0][3] - matrix[0][1];
+    frustum.planes[TOP].normal.y = matrix[1][3] - matrix[1][1];
+    frustum.planes[TOP].normal.z = matrix[2][3] - matrix[2][1];
+    frustum.planes[TOP].d = matrix[3][3] - matrix[3][1];
+
+    // Near plane
+    frustum.planes[NEAR].normal.x = matrix[0][3] + matrix[0][2];
+    frustum.planes[NEAR].normal.y = matrix[1][3] + matrix[1][2];
+    frustum.planes[NEAR].normal.z = matrix[2][3] + matrix[2][2];
+    frustum.planes[NEAR].d = matrix[3][3] + matrix[3][2];
+
+    // Far plane
+    frustum.planes[FAR].normal.x = matrix[0][3] - matrix[0][2];
+    frustum.planes[FAR].normal.y = matrix[1][3] - matrix[1][2];
+    frustum.planes[FAR].normal.z = matrix[2][3] - matrix[2][2];
+    frustum.planes[FAR].d = matrix[3][3] - matrix[3][2];
+
+    // Ќормализаци€ плоскостей
+    for (int i = 0; i < 6; i++) {
+        double length = norm(frustum.planes[i].normal);
+        if (length > 0.0) {
+            frustum.planes[i].normal = frustum.planes[i].normal / length;
+            frustum.planes[i].d /= length;
+        }
+    }
+
+    return frustum;
+}
+
+bool Frustum::intersects(const AABB& aabb) const {
+    for (int i = 0; i < 6; i++) {
+        const Plane& plane = planes[i];
+
+        // ѕоложительна€ вершина (по нормали)
+        vec3 positive = aabb.min;
+        if (plane.normal.x >= 0) positive.x = aabb.max.x;
+        if (plane.normal.y >= 0) positive.y = aabb.max.y;
+        if (plane.normal.z >= 0) positive.z = aabb.max.z;
+
+        // ≈сли положительна€ вершина снаружи плоскости, AABB снаружи
+        if (plane.distance(positive) < 0) {
+            return false;
+        }
+    }
+    return true;
+}

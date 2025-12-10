@@ -6,11 +6,13 @@
 #include <limits>
 #include <iostream>
 #include <algorithm>
+#include <memory>
 
 #include "tgaimage.h"
 #include "geometry.h"
 #include "our_gl.h"
 #include "model.h"
+#include "model_manager.h"
 
 // Явное объявление глобальных переменных
 extern mat<4, 4> ModelView;
@@ -360,13 +362,36 @@ static double compute_ssao_at(const std::vector<double>& zbuffer,
 //  Основная функция
 // ================================================================
 int main(int argc, char** argv) {
-    // Загрузка моделей
+    std::cout << "=== Renderer with ModelManager ===" << std::endl;
+
+    // Инициализация ModelManager
+    auto& modelManager = ModelManager::getInstance();
+
+    // Загрузка моделей через ModelManager
     const char* model_path = (argc > 1) ? argv[1] : DEFAULT_MODEL_PATH;
     const char* eyes_model_path = EYES_MODEL_PATH;
 
-    Model head_model(model_path);
-    Model eye_model(eyes_model_path);
+    std::cout << "Loading head model: " << model_path << std::endl;
+    auto head_model = modelManager.loadModel(model_path);
 
+    std::cout << "Loading eye model: " << eyes_model_path << std::endl;
+    auto eye_model = modelManager.loadModel(eyes_model_path);
+
+    // Проверка успешности загрузки
+    if (!head_model) {
+        std::cerr << "ERROR: Failed to load head model!" << std::endl;
+        return 1;
+    }
+
+    if (!eye_model) {
+        std::cerr << "ERROR: Failed to load eye model!" << std::endl;
+        return 1;
+    }
+
+    // Печатаем статистику ModelManager
+    modelManager.printStats();
+
+    // Создание фреймбуфера
     TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
 
     // Инициализация конвейера
@@ -387,11 +412,19 @@ int main(int argc, char** argv) {
     vec3 rim_light_dir = normalized(make_vec3(-1.0, 0.8, -1.5));
 
     // Шейдер для головы
-    PhongShader head_shader(&head_model);
+    PhongShader head_shader(head_model.get());
     head_shader.initLightDirections(key_light_dir, fill_light_dir, rim_light_dir);
 
+    // Информация о модели
+    std::cout << "\nRendering head model:" << std::endl;
+    std::cout << "  Vertices: " << head_model->nverts() << std::endl;
+    std::cout << "  Faces: " << head_model->nfaces() << std::endl;
+    std::cout << "  SubMeshes: " << head_model->getSubMeshCount() << std::endl;
+    std::cout << "  Has normal map: " << (head_model->hasNormalMap() ? "Yes" : "No") << std::endl;
+
     // Рендеринг головы
-    for (int face = 0; face < head_model.nfaces(); ++face) {
+    std::cout << "Rendering head..." << std::endl;
+    for (int face = 0; face < head_model->nfaces(); ++face) {
         vec4 clip_space_triangle[3];
         for (int vertex = 0; vertex < 3; ++vertex) {
             clip_space_triangle[vertex] = head_shader.vertex(face, vertex);
@@ -403,11 +436,17 @@ int main(int argc, char** argv) {
     std::vector<double> zbuffer_before_eyes = zbuffer;
 
     // Шейдер для глаз
-    EyeShader eye_shader(&eye_model);
+    EyeShader eye_shader(eye_model.get());
     eye_shader.initLightDirections(key_light_dir, rim_light_dir);
 
+    // Информация о модели глаз
+    std::cout << "\nRendering eye model:" << std::endl;
+    std::cout << "  Vertices: " << eye_model->nverts() << std::endl;
+    std::cout << "  Faces: " << eye_model->nfaces() << std::endl;
+
     // Рендеринг глаз
-    for (int face = 0; face < eye_model.nfaces(); ++face) {
+    std::cout << "Rendering eyes..." << std::endl;
+    for (int face = 0; face < eye_model->nfaces(); ++face) {
         vec4 clip_space_triangle[3];
         for (int vertex = 0; vertex < 3; ++vertex) {
             clip_space_triangle[vertex] = eye_shader.vertex(face, vertex);
@@ -417,15 +456,22 @@ int main(int argc, char** argv) {
 
     // Сохраняем результат с глазами
     TGAImage phong_result = framebuffer;
-    phong_result.write_tga_file("phong.tga");
+    if (phong_result.write_tga_file("phong.tga")) {
+        std::cout << "Saved: phong.tga" << std::endl;
+    }
+    else {
+        std::cerr << "ERROR: Failed to save phong.tga" << std::endl;
+    }
 
     // Восстанавливаем Z-буфер (без глаз) для SSAO
     zbuffer = zbuffer_before_eyes;
 
     // Сохраняем Z-буфер
     save_zbuffer_image(zbuffer, WIDTH, HEIGHT, "zbuffer.tga");
+    std::cout << "Saved: zbuffer.tga" << std::endl;
 
     // Вычисление и сохранение карты Ambient Occlusion
+    std::cout << "Computing SSAO..." << std::endl;
     TGAImage ao_map(WIDTH, HEIGHT, TGAImage::RGB);
     for (int y = 0; y < HEIGHT; ++y) {
         for (int x = 0; x < WIDTH; ++x) {
@@ -434,9 +480,16 @@ int main(int argc, char** argv) {
             ao_map.set(x, y, TGAColor(intensity, intensity, intensity));
         }
     }
-    ao_map.write_tga_file("ao.tga");
+
+    if (ao_map.write_tga_file("ao.tga")) {
+        std::cout << "Saved: ao.tga" << std::endl;
+    }
+    else {
+        std::cerr << "ERROR: Failed to save ao.tga" << std::endl;
+    }
 
     // Финальная композиция: Phong + AO
+    std::cout << "Compositing final image..." << std::endl;
     TGAImage final_result(WIDTH, HEIGHT, TGAImage::RGB);
     for (int y = 0; y < HEIGHT; ++y) {
         for (int x = 0; x < WIDTH; ++x) {
@@ -454,12 +507,26 @@ int main(int argc, char** argv) {
         }
     }
 
-    final_result.write_tga_file("final.tga");
+    if (final_result.write_tga_file("final.tga")) {
+        std::cout << "Saved: final.tga" << std::endl;
+    }
+    else {
+        std::cerr << "ERROR: Failed to save final.tga" << std::endl;
+    }
 
     // Вывод статистики
     print_render_stats();
-    std::cerr << "Сохранено: phong.tga (с глазами), zbuffer.tga (без глаз), "
-        << "ao.tga, final.tga\n";
+
+    // Финальная статистика ModelManager
+    std::cout << "\n=== Final ModelManager Statistics ===" << std::endl;
+    modelManager.printStats();
+
+    std::cout << "\n=== Render Complete ===" << std::endl;
+    std::cout << "Files saved:" << std::endl;
+    std::cout << "  - phong.tga (with eyes)" << std::endl;
+    std::cout << "  - zbuffer.tga (without eyes)" << std::endl;
+    std::cout << "  - ao.tga (ambient occlusion)" << std::endl;
+    std::cout << "  - final.tga (phong + ao)" << std::endl;
 
     return 0;
 }

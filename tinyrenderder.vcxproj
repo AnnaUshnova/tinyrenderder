@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="model.cpp" />
+    <ClCompile Include="model_manager.cpp" />
     <ClCompile Include="our_gl.cpp" />
     <ClCompile Include="tgaimage.cpp" />
   </ItemGroup>
@@ -28,6 +29,7 @@
     <ClInclude Include="camera.h" />
     <ClInclude Include="geometry.h" />
     <ClInclude Include="model.h" />
+    <ClInclude Include="model_manager.h" />
     <ClInclude Include="our_gl.h" />
     <ClInclude Include="tgaimage.h" />
   </ItemGroup>

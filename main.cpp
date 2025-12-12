@@ -13,6 +13,7 @@
 #include "our_gl.h"
 #include "model.h"
 #include "model_manager.h"
+#include "camera.h"
 
 // Явное объявление глобальных переменных
 extern mat<4, 4> ModelView;
@@ -21,10 +22,11 @@ extern mat<4, 4> Viewport;
 extern std::vector<double> zbuffer;
 
 // Константы рендеринга
-const int WIDTH = 800;
+const int WIDTH = 1200;  // Увеличим размер окна для Sponza
 const int HEIGHT = 800;
 const char* DEFAULT_MODEL_PATH = "obj/african_head/african_head.obj";
 const char* EYES_MODEL_PATH = "obj/african_head/african_head_eye_inner.obj";
+const char* SPONZA_MODEL_PATH = "obj/sponza/sponza.obj";
 
 // Настройки защиты глаз от нормал-мапа
 constexpr double EYE_DIFFUSE_BRIGHTNESS_THRESHOLD = 0.85;
@@ -358,18 +360,39 @@ static double compute_ssao_at(const std::vector<double>& zbuffer,
     return 1.0 - occlusion_factor * AO_INTENSITY;
 }
 
+// Создание матрицы масштабирования
+mat<4, 4> createScaleMatrix(double sx, double sy, double sz) {
+    mat<4, 4> scale = mat<4, 4>::identity();
+    scale[0][0] = sx;
+    scale[1][1] = sy;
+    scale[2][2] = sz;
+    return scale;
+}
+
+// Создание матрицы переноса
+mat<4, 4> createTranslationMatrix(double tx, double ty, double tz) {
+    mat<4, 4> translation = mat<4, 4>::identity();
+    translation[0][3] = tx;
+    translation[1][3] = ty;
+    translation[2][3] = tz;
+    return translation;
+}
+
 // ================================================================
 //  Основная функция
 // ================================================================
 int main(int argc, char** argv) {
     std::cout << "=== Renderer with ModelManager and Frustum Culling ===" << std::endl;
 
-    // Инициализация ModelManager
+    // ================================================================
+    // ИНИЦИАЛИЗАЦИЯ И ЗАГРУЗКА МОДЕЛЕЙ
+    // ================================================================
+
     auto& modelManager = ModelManager::getInstance();
 
-    // Загрузка моделей через ModelManager
     const char* model_path = (argc > 1) ? argv[1] : DEFAULT_MODEL_PATH;
     const char* eyes_model_path = EYES_MODEL_PATH;
+    const char* sponza_model_path = SPONZA_MODEL_PATH;
 
     std::cout << "Loading head model: " << model_path << std::endl;
     auto head_model = modelManager.loadModel(model_path);
@@ -377,84 +400,164 @@ int main(int argc, char** argv) {
     std::cout << "Loading eye model: " << eyes_model_path << std::endl;
     auto eye_model = modelManager.loadModel(eyes_model_path);
 
-    // Проверка успешности загрузки
-    if (!head_model) {
-        std::cerr << "ERROR: Failed to load head model!" << std::endl;
+    std::cout << "Loading sponza model: " << sponza_model_path << std::endl;
+    auto sponza_model = modelManager.loadModel(sponza_model_path);
+
+    if (!head_model || !eye_model || !sponza_model) {
+        std::cerr << "ERROR: Failed to load one or more models!" << std::endl;
         return 1;
     }
 
-    if (!eye_model) {
-        std::cerr << "ERROR: Failed to load eye model!" << std::endl;
-        return 1;
-    }
-
-    // Печатаем статистику ModelManager
     modelManager.printStats();
 
-    // Создание фреймбуфера
-    TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
+    // ================================================================
+// СОЗДАНИЕ МАТРИЦ МОДЕЛЕЙ
+// ================================================================
 
-    // Инициализация конвейера
+// Матрица для Sponza (только смещение вниз)
+    mat<4, 4> sponzaModelMatrix = createTranslationMatrix(0.0, -5.0, 0.0);
+
+    // Матрица для головы (смещена вправо и вверх)
+    mat<4, 4> headModelMatrix = createTranslationMatrix(15.0, 5.0, 0.0);
+    mat<4, 4> eyeModelMatrix = headModelMatrix;  // Глаза там же где голова
+
+    // ================================================================
+    // АНАЛИЗ СЦЕНЫ
+    // ================================================================
+
+    std::cout << "\n=== Scene Analysis ===" << std::endl;
+
+    // Локальные центры (до трансформаций)
+    std::cout << "Local centers (before transformations):" << std::endl;
+    std::cout << "  Sponza: (" << sponza_model->getCenter().x << ", "
+        << sponza_model->getCenter().y << ", " << sponza_model->getCenter().z << ")" << std::endl;
+    std::cout << "  Head: (" << head_model->getCenter().x << ", "
+        << head_model->getCenter().y << ", " << head_model->getCenter().z << ")" << std::endl;
+
+    // Мировые центры после трансформаций
+    AABB sponzaWorldAABB = sponza_model->getWorldAABB(sponzaModelMatrix);
+    AABB headWorldAABB = head_model->getWorldAABB(headModelMatrix);
+    AABB eyeWorldAABB = eye_model->getWorldAABB(eyeModelMatrix);
+
+    vec3 sponzaWorldCenter = sponzaWorldAABB.getCenter();
+    vec3 headWorldCenter = headWorldAABB.getCenter();
+
+    std::cout << "\nWorld centers (after transformations):" << std::endl;
+    std::cout << "  Sponza: (" << sponzaWorldCenter.x << ", "
+        << sponzaWorldCenter.y << ", " << sponzaWorldCenter.z << ")" << std::endl;
+    std::cout << "  Head: (" << headWorldCenter.x << ", "
+        << headWorldCenter.y << ", " << headWorldCenter.z << ")" << std::endl;
+
+    // Расстояние между моделями
+    vec3 distanceVec = headWorldCenter - sponzaWorldCenter;
+    double distance = norm(distanceVec);
+
+    std::cout << "\nDistance between Sponza and Head: " << distance << " units" << std::endl;
+
+    // ================================================================
+    // НАСТРОЙКА КАМЕРЫ
+    // ================================================================
+
+    Camera camera;
+
+    // Позиция камеры ВНУТРИ Sponza (смещена от центра для лучшей композиции)
+    vec3 cameraPosition;
+    cameraPosition.x = 3.0;   // Смещение вправо от центрального прохода
+    cameraPosition.y = 2.2;   // Высота примерно на уровне человеческого роста
+    cameraPosition.z = 5.0;   // Расположена недалеко от входа, смотря вглубь
+
+    // Смотрим вглубь атриума, слегка приподняв цель
+    vec3 lookAtPoint;
+    lookAtPoint.x = 0.0;      // Центр сцены по X
+    lookAtPoint.y = 3.5;      // Цель выше камеры - взгляд слегка вверх на своды
+    lookAtPoint.z = -15.0;    // Точка в глубине сцены
+
+    camera.setEye(cameraPosition);
+    camera.setTarget(lookAtPoint);
+    camera.setUp(vec3{ 0, 1, 0 });
+    camera.setFOV(70.0);      // Достаточно широкий угол для ощущения простора
+    camera.setAspect((double)WIDTH / HEIGHT);
+    // Дальнюю плоскость отсечения нужно увеличить для большой сцены
+    camera.setClipping(0.5, 500.0);
+
+    // ================================================================
+    // ИНИЦИАЛИЗАЦИЯ РЕНДЕРИНГА
+    // ================================================================
+
+    TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
     init_zbuffer(WIDTH, HEIGHT);
 
-    vec3 camera_position = make_vec3(0.7, 1.0, 3.0);
-    vec3 camera_target = make_vec3(0.0, 0.0, 0.0);
-    vec3 camera_up = make_vec3(0.0, 1.0, 0.0);
-
-    lookat(camera_position, camera_target, camera_up);
-    init_perspective(60.0, (double)WIDTH / (double)HEIGHT, 0.1, 100.0);
+    // Установка глобальных матриц
+    ModelView = camera.getViewMatrix();
+    Perspective = camera.getProjectionMatrix();
     init_viewport(0, 0, WIDTH, HEIGHT);
 
-    // Направления источников света в мировых координатах
-    // Направление ОТ источника К модели
+    // Направления источников света
     vec3 key_light_dir = normalized(make_vec3(1.0, 1.4, 1.0));
     vec3 fill_light_dir = normalized(make_vec3(-0.3, 0.5, 0.2));
     vec3 rim_light_dir = normalized(make_vec3(-1.0, 0.8, -1.5));
 
     // ================================================================
-    // FRUSTUM CULLING - Часть 1: Создание фрустума
+    // FRUSTUM CULLING
     // ================================================================
 
-    // Получаем матрицу вида-проекции для создания фрустума
     mat<4, 4> viewProjection = Perspective * ModelView;
     Frustum frustum = Frustum::createFromMatrix(viewProjection);
 
-    // Матрицы модели (единичные, так как модели уже в правильном положении)
-    mat<4, 4> headModelMatrix = mat<4, 4>::identity();
-    mat<4, 4> eyeModelMatrix = mat<4, 4>::identity();
-
-    // Статистика frustum culling
     int models_culled = 0;
     int models_rendered = 0;
     int total_triangles = 0;
     int culled_triangles = 0;
 
     // ================================================================
-    // РЕНДЕРИНГ ГОЛОВЫ с Frustum Culling
+    // РЕНДЕРИНГ SPONZA
     // ================================================================
 
-    // Проверка видимости головы
-    AABB headWorldAABB = head_model->getWorldAABB(headModelMatrix);
-    bool headVisible = frustum.intersects(headWorldAABB);
+    bool sponzaVisible = frustum.intersects(sponzaWorldAABB);
+    if (sponzaVisible) {
+        models_rendered++;
+        std::cout << "\nRendering sponza model (VISIBLE)" << std::endl;
 
+        mat<4, 4> originalModelView = ModelView;
+        ModelView = ModelView * sponzaModelMatrix;
+
+        PhongShader sponza_shader(sponza_model.get());
+        sponza_shader.initLightDirections(key_light_dir, fill_light_dir, rim_light_dir);
+        sponza_shader.normal_map_strength = 0.5;
+
+        total_triangles += sponza_model->nfaces();
+        for (int face = 0; face < sponza_model->nfaces(); ++face) {
+            vec4 clip_space_triangle[3];
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                clip_space_triangle[vertex] = sponza_shader.vertex(face, vertex);
+            }
+            rasterize(clip_space_triangle, sponza_shader, framebuffer);
+        }
+
+        ModelView = originalModelView;
+    }
+    else {
+        models_culled++;
+        culled_triangles += sponza_model->nfaces();
+        std::cout << "\nSponza model CULLED by frustum" << std::endl;
+    }
+
+    // ================================================================
+    // РЕНДЕРИНГ ГОЛОВЫ
+    // ================================================================
+
+    bool headVisible = frustum.intersects(headWorldAABB);
     if (headVisible) {
         models_rendered++;
+        std::cout << "\nRendering head model (VISIBLE)" << std::endl;
 
-        // Информация о модели
-        std::cout << "\nRendering head model (VISIBLE):" << std::endl;
-        std::cout << "  Vertices: " << head_model->nverts() << std::endl;
-        std::cout << "  Faces: " << head_model->nfaces() << std::endl;
-        std::cout << "  SubMeshes: " << head_model->getSubMeshCount() << std::endl;
-        std::cout << "  Has normal map: " << (head_model->hasNormalMap() ? "Yes" : "No") << std::endl;
+        mat<4, 4> originalModelView = ModelView;
+        ModelView = ModelView * headModelMatrix;
 
-        // Шейдер для головы
         PhongShader head_shader(head_model.get());
         head_shader.initLightDirections(key_light_dir, fill_light_dir, rim_light_dir);
 
-        // Рендеринг головы
-        std::cout << "Rendering head..." << std::endl;
         total_triangles += head_model->nfaces();
-
         for (int face = 0; face < head_model->nfaces(); ++face) {
             vec4 clip_space_triangle[3];
             for (int vertex = 0; vertex < 3; ++vertex) {
@@ -462,90 +565,62 @@ int main(int argc, char** argv) {
             }
             rasterize(clip_space_triangle, head_shader, framebuffer);
         }
+
+        std::vector<double> zbuffer_before_eyes = zbuffer;
+
+        // ================================================================
+        // РЕНДЕРИНГ ГЛАЗ
+        // ================================================================
+
+        bool eyesVisible = frustum.intersects(eyeWorldAABB);
+        if (eyesVisible) {
+            models_rendered++;
+            std::cout << "\nRendering eye model (VISIBLE)" << std::endl;
+
+            EyeShader eye_shader(eye_model.get());
+            eye_shader.initLightDirections(key_light_dir, rim_light_dir);
+
+            total_triangles += eye_model->nfaces();
+            for (int face = 0; face < eye_model->nfaces(); ++face) {
+                vec4 clip_space_triangle[3];
+                for (int vertex = 0; vertex < 3; ++vertex) {
+                    clip_space_triangle[vertex] = eye_shader.vertex(face, vertex);
+                }
+                rasterize(clip_space_triangle, eye_shader, framebuffer);
+            }
+        }
+        else {
+            models_culled++;
+            culled_triangles += eye_model->nfaces();
+            std::cout << "\nEye model CULLED by frustum" << std::endl;
+        }
+
+        ModelView = originalModelView;
+        zbuffer = zbuffer_before_eyes;  // Для SSAO используем Z-буфер без глаз
     }
     else {
         models_culled++;
         culled_triangles += head_model->nfaces();
         std::cout << "\nHead model CULLED by frustum" << std::endl;
-        std::cout << "  AABB Center: (" << headWorldAABB.getCenter().x << ", "
-            << headWorldAABB.getCenter().y << ", " << headWorldAABB.getCenter().z << ")" << std::endl;
-        std::cout << "  AABB Size: (" << headWorldAABB.getSize().x << ", "
-            << headWorldAABB.getSize().y << ", " << headWorldAABB.getSize().z << ")" << std::endl;
-    }
-
-    // Сохраняем Z-буфер до рендеринга глаз
-    std::vector<double> zbuffer_before_eyes = zbuffer;
-
-    // ================================================================
-    // РЕНДЕРИНГ ГЛАЗ с Frustum Culling
-    // ================================================================
-
-    // Проверка видимости глаз
-    AABB eyeWorldAABB = eye_model->getWorldAABB(eyeModelMatrix);
-    bool eyesVisible = frustum.intersects(eyeWorldAABB);
-
-    if (eyesVisible) {
-        models_rendered++;
-
-        // Информация о модели глаз
-        std::cout << "\nRendering eye model (VISIBLE):" << std::endl;
-        std::cout << "  Vertices: " << eye_model->nverts() << std::endl;
-        std::cout << "  Faces: " << eye_model->nfaces() << std::endl;
-
-        // Шейдер для глаз
-        EyeShader eye_shader(eye_model.get());
-        eye_shader.initLightDirections(key_light_dir, rim_light_dir);
-
-        // Рендеринг глаз
-        std::cout << "Rendering eyes..." << std::endl;
-        total_triangles += eye_model->nfaces();
-
-        for (int face = 0; face < eye_model->nfaces(); ++face) {
-            vec4 clip_space_triangle[3];
-            for (int vertex = 0; vertex < 3; ++vertex) {
-                clip_space_triangle[vertex] = eye_shader.vertex(face, vertex);
-            }
-            rasterize(clip_space_triangle, eye_shader, framebuffer);
-        }
-    }
-    else {
-        models_culled++;
-        culled_triangles += eye_model->nfaces();
-        std::cout << "\nEye model CULLED by frustum" << std::endl;
-        std::cout << "  AABB Center: (" << eyeWorldAABB.getCenter().x << ", "
-            << eyeWorldAABB.getCenter().y << ", " << eyeWorldAABB.getCenter().z << ")" << std::endl;
-        std::cout << "  AABB Size: (" << eyeWorldAABB.getSize().x << ", "
-            << eyeWorldAABB.getSize().y << ", " << eyeWorldAABB.getSize().z << ")" << std::endl;
     }
 
     // ================================================================
     // СОХРАНЕНИЕ РЕЗУЛЬТАТОВ
     // ================================================================
 
-    // Сохраняем результат с глазами (если что-то было отрендерено)
     if (models_rendered > 0) {
-        TGAImage phong_result = framebuffer;
-        if (phong_result.write_tga_file("phong.tga")) {
+        if (framebuffer.write_tga_file("phong.tga")) {
             std::cout << "\nSaved: phong.tga" << std::endl;
-        }
-        else {
-            std::cerr << "ERROR: Failed to save phong.tga" << std::endl;
         }
     }
     else {
         std::cout << "\nNo models rendered, skipping phong.tga" << std::endl;
-        // Создаем пустой фреймбуфер для продолжения
-        framebuffer = TGAImage(WIDTH, HEIGHT, TGAImage::RGB);
     }
 
-    // Восстанавливаем Z-буфер (без глаз) для SSAO
-    zbuffer = zbuffer_before_eyes;
-
-    // Сохраняем Z-буфер
     save_zbuffer_image(zbuffer, WIDTH, HEIGHT, "zbuffer.tga");
     std::cout << "Saved: zbuffer.tga" << std::endl;
 
-    // Вычисление и сохранение карты Ambient Occlusion
+    // Вычисление SSAO
     std::cout << "Computing SSAO..." << std::endl;
     TGAImage ao_map(WIDTH, HEIGHT, TGAImage::RGB);
     for (int y = 0; y < HEIGHT; ++y) {
@@ -555,15 +630,10 @@ int main(int argc, char** argv) {
             ao_map.set(x, y, TGAColor(intensity, intensity, intensity));
         }
     }
+    ao_map.write_tga_file("ao.tga");
+    std::cout << "Saved: ao.tga" << std::endl;
 
-    if (ao_map.write_tga_file("ao.tga")) {
-        std::cout << "Saved: ao.tga" << std::endl;
-    }
-    else {
-        std::cerr << "ERROR: Failed to save ao.tga" << std::endl;
-    }
-
-    // Финальная композиция: Phong + AO (если есть phong результат)
+    // Финальная композиция
     if (models_rendered > 0) {
         std::cout << "Compositing final image..." << std::endl;
         TGAImage final_result(WIDTH, HEIGHT, TGAImage::RGB);
@@ -571,58 +641,44 @@ int main(int argc, char** argv) {
             for (int x = 0; x < WIDTH; ++x) {
                 TGAColor phong_color = framebuffer.get(x, y);
                 TGAColor ao_color = ao_map.get(x, y);
-
                 double ao_factor = ao_color[0] / 255.0;
 
-                TGAColor final_color;
-                final_color[0] = (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor);
-                final_color[1] = (unsigned char)std::min(255.0, (double)phong_color[1] * ao_factor);
-                final_color[2] = (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor);
-
-                final_result.set(x, y, final_color);
+                final_result.set(x, y, TGAColor(
+                    (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor),
+                    (unsigned char)std::min(255.0, (double)phong_color[1] * ao_factor),
+                    (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor)
+                ));
             }
         }
-
-        if (final_result.write_tga_file("final.tga")) {
-            std::cout << "Saved: final.tga" << std::endl;
-        }
-        else {
-            std::cerr << "ERROR: Failed to save final.tga" << std::endl;
-        }
-    }
-    else {
-        std::cout << "No models rendered, skipping final.tga" << std::endl;
+        final_result.write_tga_file("final.tga");
+        std::cout << "Saved: final.tga" << std::endl;
     }
 
     // ================================================================
-    // СТАТИСТИКА И ВЫВОД РЕЗУЛЬТАТОВ
+    // СТАТИСТИКА
     // ================================================================
 
-    // Вывод статистики рендеринга
     print_render_stats();
 
-    // Статистика Frustum Culling
     std::cout << "\n=== Frustum Culling Statistics ===" << std::endl;
     std::cout << "  Total models: " << (models_rendered + models_culled) << std::endl;
     std::cout << "  Models rendered: " << models_rendered << std::endl;
     std::cout << "  Models culled: " << models_culled << std::endl;
     std::cout << "  Total triangles: " << total_triangles << std::endl;
     std::cout << "  Culled triangles: " << culled_triangles << std::endl;
-    std::cout << "  Triangle culling efficiency: "
-        << (culled_triangles * 100.0 / (total_triangles + culled_triangles)) << "%" << std::endl;
 
-    // Информация о камере для отладки
+    if ((total_triangles + culled_triangles) > 0) {
+        std::cout << "  Triangle culling efficiency: "
+            << (culled_triangles * 100.0 / (total_triangles + culled_triangles)) << "%" << std::endl;
+    }
+
     std::cout << "\nCamera Information:" << std::endl;
-    std::cout << "  Position: (" << camera_position.x << ", "
-        << camera_position.y << ", " << camera_position.z << ")" << std::endl;
-    std::cout << "  Target: (" << camera_target.x << ", "
-        << camera_target.y << ", " << camera_target.z << ")" << std::endl;
-    std::cout << "  FOV: 60 degrees" << std::endl;
-    std::cout << "  Near plane: 0.1" << std::endl;
-    std::cout << "  Far plane: 100.0" << std::endl;
+    camera.printInfo();
 
-    // Финальная статистика ModelManager
-    std::cout << "\n=== Final ModelManager Statistics ===" << std::endl;
+    std::cout << "\nModel Positions:" << std::endl;
+    std::cout << "  Sponza: scale 0.05, position (0, -5, 0)" << std::endl;
+    std::cout << "  Head: position (15, 5, 0)" << std::endl;
+
     modelManager.printStats();
 
     std::cout << "\n=== Render Complete ===" << std::endl;
@@ -633,9 +689,6 @@ int main(int argc, char** argv) {
     if (models_rendered > 0) {
         std::cout << "  - phong.tga (with eyes)" << std::endl;
         std::cout << "  - final.tga (phong + ao)" << std::endl;
-    }
-    else {
-        std::cout << "  - [phong.tga and final.tga skipped - no visible models]" << std::endl;
     }
 
     return 0;

@@ -63,6 +63,12 @@ public:
     vec3 vert(int iface, int nthvert) const;
     vec3 normal(int iface, int nthvert) const;
     vec2 uv(int iface, int nthvert) const;
+    vec3 getCenter() const {
+        return localAABB.getCenter();
+    }
+    vec3 getSize() const {
+        return localAABB.max - localAABB.min;
+    }
 
     // Для шейдеров
     TGAColor diffuse(const vec2& uv) const;

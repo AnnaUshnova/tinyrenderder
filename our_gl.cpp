@@ -91,6 +91,7 @@ void rasterize(const Triangle& clip, const IShader& shader, TGAImage& framebuffe
 
     // Вершины в clip-space (из шейдера)
     vec4 v0 = clip[0], v1 = clip[1], v2 = clip[2];
+    if (v0[3] <= 1e-12 || v1[3] <= 1e-12 || v2[3] <= 1e-12) return;
 
     // Проверка: если какая-либо w == 0, нельзя делить
     if (std::abs(v0[3]) < 1e-12 || std::abs(v1[3]) < 1e-12 || std::abs(v2[3]) < 1e-12)
@@ -98,6 +99,11 @@ void rasterize(const Triangle& clip, const IShader& shader, TGAImage& framebuffe
 
     // Перспективное деление -> NDC
     vec4 ndc4[3] = { v0 / v0[3], v1 / v1[3], v2 / v2[3] };
+    // если треугольник полностью вне z диапазона (NDC z вне [-1,1]) — выкинуть
+    bool z_out0 = (ndc4[0][2] < -1.0 || ndc4[0][2] > 1.0);
+    bool z_out1 = (ndc4[1][2] < -1.0 || ndc4[1][2] > 1.0);
+    bool z_out2 = (ndc4[2][2] < -1.0 || ndc4[2][2] > 1.0);
+    if (z_out0 && z_out1 && z_out2) return;
 
     // Проверка на NaN/Inf после деления
     for (int i = 0; i < 3; ++i) {

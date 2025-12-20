@@ -7,6 +7,7 @@
 #include <iostream>
 #include <algorithm>
 #include <memory>
+#include <iomanip>
 
 #include "tgaimage.h"
 #include "geometry.h"
@@ -378,6 +379,90 @@ mat<4, 4> createTranslationMatrix(double tx, double ty, double tz) {
     return translation;
 }
 
+mat<4, 4> createRotationXMatrix(double angleRad) {
+    mat<4, 4> r = mat<4, 4>::identity();
+    double c = cos(angleRad);
+    double s = sin(angleRad);
+
+    r[1][1] = c;
+    r[1][2] = -s;
+    r[2][1] = s;
+    r[2][2] = c;
+    return r;
+}
+
+mat<4, 4> createRotationZMatrix(double angleRad) {
+    mat<4, 4> r = mat<4, 4>::identity();
+
+    double c = cos(angleRad);
+    double s = sin(angleRad);
+
+    r[0][0] = c;
+    r[0][1] = -s;
+    r[1][0] = s;
+    r[1][1] = c;
+
+    return r;
+}
+
+mat<4, 4> createRotationYMatrix(double angleRad) {
+    mat<4, 4> r = mat<4, 4>::identity();
+
+    double c = cos(angleRad);
+    double s = sin(angleRad);
+
+    r[0][0] = c;
+    r[0][2] = s;
+    r[2][0] = -s;
+    r[2][2] = c;
+
+    return r;
+}
+
+static void printVec3(const char* name, const vec3& v) {
+    std::cout << name << " = ("
+        << std::fixed << std::setprecision(4)
+        << v.x << ", " << v.y << ", " << v.z << ")\n";
+}
+
+static void printMat4(const char* name, const mat<4, 4>& m) {
+    std::cout << name << ":\n";
+    std::cout << std::fixed << std::setprecision(6);
+    for (int r = 0; r < 4; ++r) {
+        std::cout << "  ";
+        for (int c = 0; c < 4; ++c) {
+            std::cout << std::setw(12) << m[r][c] << " ";
+        }
+        std::cout << "\n";
+    }
+}
+
+// Умножение mat4 * vec4 (вектор-столбец).
+// Если у тебя на деле v*M, то это и есть проблема — и этот тест это подсветит.
+static vec4 mul(const mat<4, 4>& m, const vec4& v) {
+    vec4 r;
+    for (int i = 0; i < 4; ++i) {
+        r[i] = m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2] + m[i][3] * v[3];
+    }
+    return r;
+}
+
+static vec3 toVec3(const vec4& v) {
+    if (std::abs(v[3]) > 1e-12) return vec3{ v[0] / v[3], v[1] / v[3], v[2] / v[3] };
+    return vec3{ v[0], v[1], v[2] };
+}
+
+static vec3 normalize3(const vec3& v) {
+    double len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (len < 1e-12) return v;
+    return vec3{ v.x / len, v.y / len, v.z / len };
+}
+
+static vec3 sub3(const vec3& a, const vec3& b) {
+    return vec3{ a.x - b.x, a.y - b.y, a.z - b.z };
+}
+
+
 // ================================================================
 //  Основная функция
 // ================================================================
@@ -414,12 +499,44 @@ int main(int argc, char** argv) {
 // СОЗДАНИЕ МАТРИЦ МОДЕЛЕЙ
 // ================================================================
 
-// Матрица для Sponza (только смещение вниз)
-    mat<4, 4> sponzaModelMatrix = createTranslationMatrix(0.0, -5.0, 0.0);
+// =======================
+// SPONZA: Model Matrix
+// =======================
 
-    // Матрица для головы (смещена вправо и вверх)
-    mat<4, 4> headModelMatrix = createTranslationMatrix(15.0, 5.0, 0.0);
+    mat<4, 4> sponzaModelMatrix =
+        createScaleMatrix(0.014, 0.014, 0.014);
+
+    mat<4, 4> headModelMatrix =
+        createTranslationMatrix(0.0, 1.6815, 0.0) *
+        createRotationYMatrix(-112.82 * M_PI / 180.0);
+
     mat<4, 4> eyeModelMatrix = headModelMatrix;  // Глаза там же где голова
+
+    std::cout << "\n=== DEBUG: HEAD TRANSFORM ===\n";
+    printMat4("headModelMatrix", headModelMatrix);
+
+    // Мировая позиция локального начала координат (0,0,0,1)
+    vec3 headOriginW = toVec3(mul(headModelMatrix, vec4{ 0,0,0,1 }));
+
+    // Мировые направления локальных осей (берём точки на осях и смотрим разницу)
+    vec3 headXW = toVec3(mul(headModelMatrix, vec4{ 1,0,0,1 }));
+    vec3 headYW = toVec3(mul(headModelMatrix, vec4{ 0,1,0,1 }));
+    vec3 headZW = toVec3(mul(headModelMatrix, vec4{ 0,0,1,1 }));
+
+    vec3 axisX = normalize3(sub3(headXW, headOriginW));
+    vec3 axisY = normalize3(sub3(headYW, headOriginW));
+    vec3 axisZ = normalize3(sub3(headZW, headOriginW));
+
+    printVec3("headOriginW", headOriginW);
+    printVec3("headAxisX_W (dir)", axisX);
+    printVec3("headAxisY_W (dir)", axisY);
+    printVec3("headAxisZ_W (dir)", axisZ);
+
+    // Часто у модели "вперёд" = +Z или -Z.
+    // Посмотри на эти два варианта и сравни с тем, куда должен смотреть нос.
+    printVec3("headForward(+Z)", axisZ);
+    printVec3("headForward(-Z)", vec3{ -axisZ.x, -axisZ.y, -axisZ.z });
+
 
     // ================================================================
     // АНАЛИЗ СЦЕНЫ
@@ -454,31 +571,33 @@ int main(int argc, char** argv) {
 
     std::cout << "\nDistance between Sponza and Head: " << distance << " units" << std::endl;
 
+    auto center = [](const AABB& b) {
+        return vec3{ (b.min.x + b.max.x) * 0.5, (b.min.y + b.max.y) * 0.5, (b.min.z + b.max.z) * 0.5 };
+        };
+
+    printVec3("headAABB center", center(headWorldAABB));
+    printVec3("eyeAABB  center", center(eyeWorldAABB));
+
     // ================================================================
     // НАСТРОЙКА КАМЕРЫ
     // ================================================================
 
     Camera camera;
 
-    // Позиция камеры ВНУТРИ Sponza (смещена от центра для лучшей композиции)
-    vec3 cameraPosition;
-    cameraPosition.x = 3.0;   // Смещение вправо от центрального прохода
-    cameraPosition.y = 2.2;   // Высота примерно на уровне человеческого роста
-    cameraPosition.z = 5.0;   // Расположена недалеко от входа, смотря вглубь
-
-    // Смотрим вглубь атриума, слегка приподняв цель
-    vec3 lookAtPoint;
-    lookAtPoint.x = 0.0;      // Центр сцены по X
-    lookAtPoint.y = 3.5;      // Цель выше камеры - взгляд слегка вверх на своды
-    lookAtPoint.z = -15.0;    // Точка в глубине сцены
-
+    vec3 cameraPosition = { -3.4019, 2.2001, 1.8026 };
+    vec3 lookAtPoint = { 1.3555, 1.5116, -0.9686 };
     camera.setEye(cameraPosition);
     camera.setTarget(lookAtPoint);
-    camera.setUp(vec3{ 0, 1, 0 });
-    camera.setFOV(70.0);      // Достаточно широкий угол для ощущения простора
+    camera.setUp(vec3{ 0,1,0 });
+    camera.setFOV(70.0);
     camera.setAspect((double)WIDTH / HEIGHT);
-    // Дальнюю плоскость отсечения нужно увеличить для большой сцены
-    camera.setClipping(0.5, 500.0);
+    camera.setClipping(0.05, 500.0);   // near обязательно меньше, иначе всё режется
+    // Точка в глубине сцены
+
+    camera.printInfo();
+    std::cout << "Sponza world AABB min=(" << sponzaWorldAABB.min.x << "," << sponzaWorldAABB.min.y << "," << sponzaWorldAABB.min.z << ")\n";
+    std::cout << "Sponza world AABB max=(" << sponzaWorldAABB.max.x << "," << sponzaWorldAABB.max.y << "," << sponzaWorldAABB.max.z << ")\n";
+
 
     // ================================================================
     // ИНИЦИАЛИЗАЦИЯ РЕНДЕРИНГА
@@ -512,6 +631,18 @@ int main(int argc, char** argv) {
     // ================================================================
     // РЕНДЕРИНГ SPONZA
     // ================================================================
+
+    std::cout << "\n=== DEBUG: EYE CULLING CHECK ===\n";
+    printMat4("headModelMatrix", headModelMatrix);
+    printMat4("eyeModelMatrix", eyeModelMatrix);
+
+    std::cout << "headWorldAABB min=(" << headWorldAABB.min.x << "," << headWorldAABB.min.y << "," << headWorldAABB.min.z << ")\n";
+    std::cout << "headWorldAABB max=(" << headWorldAABB.max.x << "," << headWorldAABB.max.y << "," << headWorldAABB.max.z << ")\n";
+
+    std::cout << "eyeWorldAABB  min=(" << eyeWorldAABB.min.x << "," << eyeWorldAABB.min.y << "," << eyeWorldAABB.min.z << ")\n";
+    std::cout << "eyeWorldAABB  max=(" << eyeWorldAABB.max.x << "," << eyeWorldAABB.max.y << "," << eyeWorldAABB.max.z << ")\n";
+
+
 
     bool sponzaVisible = frustum.intersects(sponzaWorldAABB);
     if (sponzaVisible) {
@@ -572,7 +703,7 @@ int main(int argc, char** argv) {
         // РЕНДЕРИНГ ГЛАЗ
         // ================================================================
 
-        bool eyesVisible = frustum.intersects(eyeWorldAABB);
+        bool eyesVisible = frustum.intersects(headWorldAABB);
         if (eyesVisible) {
             models_rendered++;
             std::cout << "\nRendering eye model (VISIBLE)" << std::endl;
@@ -644,9 +775,9 @@ int main(int argc, char** argv) {
                 double ao_factor = ao_color[0] / 255.0;
 
                 final_result.set(x, y, TGAColor(
-                    (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor),
+                    (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor),
                     (unsigned char)std::min(255.0, (double)phong_color[1] * ao_factor),
-                    (unsigned char)std::min(255.0, (double)phong_color[2] * ao_factor)
+                    (unsigned char)std::min(255.0, (double)phong_color[0] * ao_factor)
                 ));
             }
         }
@@ -670,25 +801,6 @@ int main(int argc, char** argv) {
     if ((total_triangles + culled_triangles) > 0) {
         std::cout << "  Triangle culling efficiency: "
             << (culled_triangles * 100.0 / (total_triangles + culled_triangles)) << "%" << std::endl;
-    }
-
-    std::cout << "\nCamera Information:" << std::endl;
-    camera.printInfo();
-
-    std::cout << "\nModel Positions:" << std::endl;
-    std::cout << "  Sponza: scale 0.05, position (0, -5, 0)" << std::endl;
-    std::cout << "  Head: position (15, 5, 0)" << std::endl;
-
-    modelManager.printStats();
-
-    std::cout << "\n=== Render Complete ===" << std::endl;
-    std::cout << "Files saved:" << std::endl;
-    std::cout << "  - zbuffer.tga (without eyes)" << std::endl;
-    std::cout << "  - ao.tga (ambient occlusion)" << std::endl;
-
-    if (models_rendered > 0) {
-        std::cout << "  - phong.tga (with eyes)" << std::endl;
-        std::cout << "  - final.tga (phong + ao)" << std::endl;
     }
 
     return 0;
